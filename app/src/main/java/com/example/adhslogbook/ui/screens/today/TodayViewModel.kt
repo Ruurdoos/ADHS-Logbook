@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 data class TodayUiState(
     val contentState: ScreenContentState<TodayContent> = ScreenContentState.Loading,
     val snackbarMessage: String? = null,
+    val hasUnsavedChanges: Boolean = false,
 )
 
 class TodayViewModel : ViewModel() {

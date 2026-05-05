@@ -1,5 +1,10 @@
 package com.example.adhslogbook.ui.screens.today
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -114,7 +119,9 @@ fun TodayRoute(
             TodayScreen(
                 content = content,
                 contentPadding = innerPadding,
+                hasUnsavedChanges = uiState.hasUnsavedChanges,
                 onMetricChange = viewModel::updateMetric,
+                onLogMetrics = viewModel::logMetrics,
                 onToggleTag = viewModel::toggleTag,
                 onAddTag = viewModel::addQuickTag,
                 onNotesChange = viewModel::updateNotes,
@@ -128,7 +135,9 @@ fun TodayRoute(
 private fun TodayScreen(
     content: TodayContent,
     contentPadding: PaddingValues,
+    hasUnsavedChanges: Boolean,
     onMetricChange: (MetricType, Float) -> Unit,
+    onLogMetrics: () -> Unit,
     onToggleTag: (String) -> Unit,
     onAddTag: () -> Unit,
     onNotesChange: (String) -> Unit,
@@ -192,6 +201,23 @@ private fun TodayScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(spacing.md)) {
                     content.metrics.forEach { metric ->
                         MetricSliderCard(metric = metric) { onMetricChange(metric.type, it) }
+                    }
+                    AnimatedVisibility(
+                        visible = hasUnsavedChanges,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically(),
+                    ) {
+                        Button(
+                            onClick = onLogMetrics,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = CircleShape,
+                        ) {
+                            Icon(Icons.Outlined.Check, contentDescription = null)
+                            Text(
+                                text = "Log Now",
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
                     }
                 }
             }

@@ -42,7 +42,19 @@ class TodayViewModel : ViewModel() {
             }
         }
         _uiState.update {
-            it.copy(contentState = ScreenContentState.Data(current.copy(metrics = updated)))
+            it.copy(
+                contentState = ScreenContentState.Data(current.copy(metrics = updated)),
+                hasUnsavedChanges = true
+            )
+        }
+    }
+
+    fun logMetrics() {
+        _uiState.update {
+            it.copy(
+                hasUnsavedChanges = false,
+                snackbarMessage = "Check-in metrics logged successfully."
+            )
         }
     }
 

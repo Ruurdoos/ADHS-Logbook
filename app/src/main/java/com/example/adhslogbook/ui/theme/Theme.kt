@@ -42,6 +42,7 @@ object FocusLogPalette {
     val OnErrorContainer = Color(0xFF93000A)
     val SuccessContainer = Color(0xFFD6F4E0)
     val OnSuccessContainer = Color(0xFF154D29)
+    val Teal = Color(0xFF008080)
 
     val EditorialBackground = Color(0xFFFAFAF5)
     val EditorialSurface = Color(0xFFFFFFFF)

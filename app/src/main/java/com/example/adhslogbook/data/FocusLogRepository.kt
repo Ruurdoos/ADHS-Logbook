@@ -27,16 +27,20 @@ object FocusLogRepository {
         ),
         lastTaken = "08:30 AM",
         estimatedDuration = "10-12 Hours",
-        nowMarker = 0.6f,
-        effectCurve = listOf(
-            CurvePoint(0f, 1f),
-            CurvePoint(0.12f, 0.96f),
-            CurvePoint(0.24f, 0.6f),
-            CurvePoint(0.36f, 0.28f),
-            CurvePoint(0.5f, 0.18f),
-            CurvePoint(0.68f, 0.22f),
-            CurvePoint(0.84f, 0.6f),
-            CurvePoint(1f, 1f),
+        doseTimestamp = System.currentTimeMillis() - 4 * 3600 * 1000, // 4 hours ago
+        expectedCurve = listOf(
+            CurvePoint(0.000f, 1.00f),
+            CurvePoint(0.125f, 0.00f),
+            CurvePoint(0.333f, 0.05f),
+            CurvePoint(0.666f, 0.40f),
+            CurvePoint(1.000f, 0.90f),
+        ),
+        actualCurve = listOf(
+            CurvePoint(0.000f, 1.00f),
+            CurvePoint(0.240f, 0.40f),
+            CurvePoint(0.500f, 0.82f),
+            CurvePoint(0.840f, 0.38f),
+            CurvePoint(1.000f, 0.00f),
         ),
         metrics = listOf(
             CheckInMetric(MetricType.Focus, 0.75f, "Good"),

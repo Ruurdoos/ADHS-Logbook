@@ -34,10 +34,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.content.Intent
 import com.example.adhslogbook.data.model.InsightCard
 import com.example.adhslogbook.data.model.InsightCardStyle
 import com.example.adhslogbook.data.model.InsightsContent
@@ -49,23 +51,20 @@ import com.example.adhslogbook.ui.components.FocusLogBottomBar
 import com.example.adhslogbook.ui.components.FocusLogTopBar
 import com.example.adhslogbook.ui.components.ScreenStateHost
 import com.example.adhslogbook.ui.theme.FocusLogTheme
+import com.example.adhslogbook.ui.viewmodels.LogbookViewModel
+import java.time.DayOfWeek
 
 @Composable
 fun InsightsRoute(
+    viewModel: LogbookViewModel,
     currentDestination: FocusLogDestination,
     onNavigate: (FocusLogDestination) -> Unit,
     onHomeClick: () -> Unit,
-    viewModel: InsightsViewModel = viewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val uiState by viewModel.insightsContent.collectAsStateWithLifecycle()
+    val selectedPeriod by viewModel.selectedPeriod.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-
-    LaunchedEffect(uiState.snackbarMessage) {
-        uiState.snackbarMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
-            viewModel.consumeSnackbar()
-        }
-    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -85,8 +84,8 @@ fun InsightsRoute(
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         ScreenStateHost(
-            state = uiState.contentState,
-            onRetry = viewModel::retry,
+            state = uiState,
+            onRetry = { /* viewModel::retry */ },
             modifier = Modifier
                 .padding(innerPadding)
                 .fillMaxSize(),
@@ -95,10 +94,17 @@ fun InsightsRoute(
         ) { content ->
             InsightsScreen(
                 content = content,
-                selectedPeriod = uiState.selectedPeriod,
+                selectedPeriod = selectedPeriod,
                 contentPadding = innerPadding,
                 onSelectPeriod = viewModel::selectPeriod,
-                onExport = viewModel::exportForDoctor,
+                onExport = {
+                    val exportText = viewModel.getExportText()
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, exportText)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Export for Doctor"))
+                },
             )
         }
     }
@@ -411,7 +417,7 @@ private fun TrendBarItem(bar: TrendBar) {
             Box(
                 modifier = Modifier
                     .width(24.dp)
-                    .height((bar.value * 120f).dp.coerceAtLeast(12.dp))
+                    .height((bar.value * 120f).dp)
                     .background(
                         color = if (bar.highlighted) {
                             MaterialTheme.colorScheme.primary

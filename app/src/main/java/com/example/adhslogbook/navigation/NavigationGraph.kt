@@ -11,9 +11,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.adhslogbook.ui.screens.insights.InsightsRoute
 import com.example.adhslogbook.ui.screens.timeline.TimelineRoute
 import com.example.adhslogbook.ui.screens.today.TodayRoute
+import com.example.adhslogbook.ui.viewmodels.LogbookViewModel
 
 enum class FocusLogDestination(
     val route: String,
@@ -35,12 +37,15 @@ val ProductDestinations = listOf(
 fun NavigationGraph(
     navController: NavHostController = rememberNavController(),
 ) {
+    val logbookViewModel: LogbookViewModel = viewModel()
+
     NavHost(
         navController = navController,
         startDestination = FocusLogDestination.Today.route,
     ) {
         composable(FocusLogDestination.Today.route) {
             TodayRoute(
+                viewModel = logbookViewModel,
                 currentDestination = FocusLogDestination.Today,
                 onNavigate = navController::navigateToTopLevel,
                 onHomeClick = { navController.navigateToTopLevel(FocusLogDestination.Today) },
@@ -48,6 +53,7 @@ fun NavigationGraph(
         }
         composable(FocusLogDestination.Timeline.route) {
             TimelineRoute(
+                viewModel = logbookViewModel,
                 currentDestination = FocusLogDestination.Timeline,
                 onNavigate = navController::navigateToTopLevel,
                 onHomeClick = { navController.navigateToTopLevel(FocusLogDestination.Today) },
@@ -55,6 +61,7 @@ fun NavigationGraph(
         }
         composable(FocusLogDestination.Insights.route) {
             InsightsRoute(
+                viewModel = logbookViewModel,
                 currentDestination = FocusLogDestination.Insights,
                 onNavigate = navController::navigateToTopLevel,
                 onHomeClick = { navController.navigateToTopLevel(FocusLogDestination.Today) },

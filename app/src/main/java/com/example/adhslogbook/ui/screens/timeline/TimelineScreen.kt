@@ -35,7 +35,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -47,7 +46,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.adhslogbook.data.model.ActivityEntry
 import com.example.adhslogbook.data.model.CurvePoint
 import com.example.adhslogbook.data.model.SideEffectItem
 import com.example.adhslogbook.data.model.TimelineDay
@@ -57,25 +56,58 @@ import com.example.adhslogbook.navigation.FocusLogDestination
 import com.example.adhslogbook.navigation.ProductDestinations
 import com.example.adhslogbook.ui.components.FocusLogBottomBar
 import com.example.adhslogbook.ui.components.FocusLogTopBar
-import com.example.adhslogbook.ui.components.ScreenStateHost
+import com.example.adhslogbook.ui.state.ScreenContentState
 import com.example.adhslogbook.ui.theme.FocusLogPalette
 import com.example.adhslogbook.ui.theme.FocusLogTheme
+import com.example.adhslogbook.ui.viewmodels.LogbookViewModel
 
 @Composable
 fun TimelineRoute(
+    viewModel: LogbookViewModel,
     currentDestination: FocusLogDestination,
     onNavigate: (FocusLogDestination) -> Unit,
     onHomeClick: () -> Unit,
-    viewModel: TimelineViewModel = viewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val todayContentState by viewModel.todayContent.collectAsStateWithLifecycle()
+    val timelineEntries by viewModel.timelineEntries.collectAsStateWithLifecycle()
+    val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(uiState.snackbarMessage) {
-        uiState.snackbarMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
-            viewModel.consumeSnackbar()
-        }
+    val content = remember(timelineEntries, selectedDate, todayContentState) {
+        val todayData = (todayContentState as? ScreenContentState.Data)?.value
+        TimelineDay(
+            dateLabel = selectedDate.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMM d")),
+            subtitle = "Daily Summary",
+            actualCurve = todayData?.actualCurve ?: emptyList(),
+            expectedCurve = todayData?.expectedCurve ?: emptyList(),
+            events = timelineEntries.map { entry ->
+                when (entry) {
+                    is ActivityEntry.DoseTaken -> TimelineEvent(
+                        id = "dose-${entry.timestamp}",
+                        time = formatTime(entry.timestamp),
+                        title = "Dose Taken",
+                        type = TimelineEventType.Dose
+                    )
+                    is ActivityEntry.CheckInEntry -> TimelineEvent(
+                        id = "checkin-${entry.timestamp}",
+                        time = formatTime(entry.timestamp),
+                        title = entry.label,
+                        description = entry.log.notes,
+                        type = TimelineEventType.Focus
+                    )
+                    is ActivityEntry.SideEffectEntry -> TimelineEvent(
+                        id = "se-${entry.timestamp}",
+                        time = formatTime(entry.timestamp),
+                        title = "Side Effect",
+                        description = entry.log.effectName,
+                        type = TimelineEventType.SideEffect
+                    )
+                }
+            },
+            sideEffects = timelineEntries.filterIsInstance<ActivityEntry.SideEffectEntry>().map {
+                SideEffectItem(it.log.effectName)
+            }
+        )
     }
 
     Scaffold(
@@ -95,7 +127,7 @@ fun TimelineRoute(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = viewModel::addEvent,
+                onClick = { viewModel.addQuickNote("Manual entry") },
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 shape = RoundedCornerShape(20.dp),
@@ -105,25 +137,23 @@ fun TimelineRoute(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
-        ScreenStateHost(
-            state = uiState.contentState,
-            onRetry = viewModel::retry,
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize(),
-            loadingMessage = "Loading timeline",
-            emptyMessage = "No timeline events have been logged yet.",
-        ) { content ->
-            TimelineScreen(
-                content = content,
-                contentPadding = innerPadding,
-                hasPrevious = uiState.hasPrevious,
-                hasNext = uiState.hasNext,
-                onPrevious = viewModel::showPreviousDay,
-                onNext = viewModel::showNextDay,
-            )
-        }
+        TimelineScreen(
+            content = content,
+            contentPadding = innerPadding,
+            hasPrevious = true,
+            hasNext = true,
+            onPrevious = { viewModel.selectDate(selectedDate.minusDays(1)) },
+            onNext = { viewModel.selectDate(selectedDate.plusDays(1)) },
+        )
     }
+}
+
+private fun formatTime(timestamp: Long): String {
+    val date = java.time.Instant.ofEpochMilli(timestamp)
+        .atZone(java.time.ZoneId.systemDefault())
+        .toLocalTime()
+    val formatter = java.time.format.DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.US)
+    return date.format(formatter)
 }
 
 @Composable

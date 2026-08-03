@@ -23,4 +23,10 @@ interface MedicationDoseDao {
 
     @Query("SELECT * FROM medication_doses WHERE takenAt >= :startOfDay AND takenAt <= :endOfDay ORDER BY takenAt ASC")
     fun getByDate(startOfDay: Long, endOfDay: Long): Flow<List<MedicationDose>>
+
+    @Query("SELECT * FROM medication_doses WHERE takenAt >= :start AND takenAt < :endExclusive ORDER BY takenAt ASC")
+    fun observeRange(start: Long, endExclusive: Long): Flow<List<MedicationDose>>
+
+    @Query("SELECT * FROM medication_doses WHERE takenAt >= :start AND takenAt < :endExclusive ORDER BY takenAt ASC")
+    suspend fun getRange(start: Long, endExclusive: Long): List<MedicationDose>
 }

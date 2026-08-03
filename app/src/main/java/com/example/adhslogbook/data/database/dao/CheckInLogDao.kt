@@ -20,4 +20,10 @@ interface CheckInLogDao {
 
     @Query("SELECT * FROM check_in_logs WHERE timestamp >= :startOfDay AND timestamp <= :endOfDay ORDER BY timestamp ASC")
     fun getByDate(startOfDay: Long, endOfDay: Long): Flow<List<CheckInLog>>
+
+    @Query("SELECT * FROM check_in_logs WHERE timestamp >= :start AND timestamp < :endExclusive ORDER BY timestamp ASC")
+    fun observeRange(start: Long, endExclusive: Long): Flow<List<CheckInLog>>
+
+    @Query("SELECT * FROM check_in_logs WHERE timestamp >= :start AND timestamp < :endExclusive ORDER BY timestamp ASC")
+    suspend fun getRange(start: Long, endExclusive: Long): List<CheckInLog>
 }

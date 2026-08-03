@@ -17,4 +17,7 @@ interface SideEffectLogDao {
 
     @Query("SELECT * FROM side_effect_logs WHERE timestamp >= :startOfDay AND timestamp <= :endOfDay ORDER BY timestamp ASC")
     fun getByDate(startOfDay: Long, endOfDay: Long): Flow<List<SideEffectLog>>
+
+    @Query("SELECT * FROM side_effect_logs WHERE timestamp >= :start AND timestamp < :endExclusive ORDER BY timestamp ASC")
+    suspend fun getRange(start: Long, endExclusive: Long): List<SideEffectLog>
 }

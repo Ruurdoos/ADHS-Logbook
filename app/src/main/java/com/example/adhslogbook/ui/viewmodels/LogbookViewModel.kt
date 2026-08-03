@@ -2,25 +2,21 @@ package com.example.adhslogbook.ui.viewmodels
 
 import android.app.Application
 import android.content.Context
+import android.text.format.DateFormat
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.adhslogbook.data.FocusLogRepository
+import com.example.adhslogbook.data.InsightEngine
+import com.example.adhslogbook.R
 import com.example.adhslogbook.data.database.dao.CheckInLogDao
 import com.example.adhslogbook.data.database.dao.MedicationDoseDao
 import com.example.adhslogbook.data.database.dao.SideEffectLogDao
-import com.example.adhslogbook.data.InsightEngine
 import com.example.adhslogbook.data.model.ActivityEntry
 import com.example.adhslogbook.data.model.CheckInLog
 import com.example.adhslogbook.data.model.CheckInMetric
-import com.example.adhslogbook.data.model.CurvePoint
-import com.example.adhslogbook.data.model.InsightCard
-import com.example.adhslogbook.data.model.InsightCardStyle
-import com.example.adhslogbook.data.model.MedicationDose
 import com.example.adhslogbook.data.model.InsightsContent
-import com.example.adhslogbook.data.model.InsightsPeriod
+import com.example.adhslogbook.data.model.MedicationDose
 import com.example.adhslogbook.data.model.MedicationStatus
+import com.example.adhslogbook.data.model.MedicationSummary
 import com.example.adhslogbook.data.model.MetricType
 import com.example.adhslogbook.data.model.SideEffectLog
 import com.example.adhslogbook.data.model.TagOption
@@ -28,460 +24,341 @@ import com.example.adhslogbook.data.model.TodayContent
 import com.example.adhslogbook.data.model.TrendBar
 import com.example.adhslogbook.di.DatabaseModule
 import com.example.adhslogbook.ui.state.ScreenContentState
-import com.example.adhslogbook.ui.state.contentStateOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Calendar
-import java.util.Locale
+import java.time.format.FormatStyle
+import java.util.Date
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LogbookViewModel(application: Application) : AndroidViewModel(application) {
-
     private val doseDao: MedicationDoseDao = DatabaseModule.provideMedicationDoseDao(application)
     private val checkInDao: CheckInLogDao = DatabaseModule.provideCheckInLogDao(application)
     private val sideEffectDao: SideEffectLogDao = DatabaseModule.provideSideEffectLogDao(application)
+    private val prefs = application.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val zone: ZoneId get() = ZoneId.systemDefault()
 
-    // --- Today Screen State & Logic ---
     private val _selectedDate = MutableStateFlow(LocalDate.now())
-    val selectedDate: StateFlow<LocalDate> = _selectedDate.asStateFlow()
-
-    private val _localChanges = MutableStateFlow<LocalChanges?>(null)
-
-    private val _plannedMedicationName = MutableStateFlow("Elvanse")
-    private val _plannedDoseMg = MutableStateFlow(30)
-    
-    data class LocalChanges(
-        val metrics: List<CheckInMetric>,
-        val notes: String
-    )
-
-    private val prefs = application.getSharedPreferences("adhs_logbook_prefs", Context.MODE_PRIVATE)
+    val selectedDate = _selectedDate.asStateFlow()
+    val currentDate = flow {
+        while (true) {
+            emit(LocalDate.now())
+            delay(DATE_REFRESH_MILLIS)
+        }
+    }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, LocalDate.now())
+    private val _medicationName = MutableStateFlow(prefs.getString(KEY_MEDICATION, "").orEmpty())
+    private val _doseMg = MutableStateFlow(prefs.getInt(KEY_DOSE, 0))
+    val medicationName = _medicationName.asStateFlow()
+    val doseMg = _doseMg.asStateFlow()
 
     private val _availableTags = MutableStateFlow(loadTags())
-    val availableTags: StateFlow<List<String>> = _availableTags.asStateFlow()
-
     private val _selectedTags = MutableStateFlow<Set<String>>(emptySet())
-    val selectedTags: StateFlow<Set<String>> = _selectedTags.asStateFlow()
+    private val _localChanges = MutableStateFlow<LocalChanges?>(null)
+    private val _snackbar = MutableStateFlow<String?>(null)
+    private val _doseSaving = MutableStateFlow(false)
+    private val _checkInSaving = MutableStateFlow(false)
+    val snackbar = _snackbar.asStateFlow()
+    val doseSaving = _doseSaving.asStateFlow()
+    val checkInSaving = _checkInSaving.asStateFlow()
 
-    private fun loadTags(): List<String> {
-        val savedTags = prefs.getStringSet("available_tags", null)
-        return if (savedTags != null) {
-            savedTags.toList().sorted()
-        } else {
-            val defaults = listOf("Peak", "Good focus", "Calm", "Restless", "Rebound", "No effect", "Can't concentrate")
-            saveTags(defaults)
-            defaults
-        }
-    }
-
-    private fun saveTags(tags: List<String>) {
-        prefs.edit().putStringSet("available_tags", tags.toSet()).apply()
-    }
-
-    private val _todaySnackbar = MutableStateFlow<String?>(null)
-    val todaySnackbar: StateFlow<String?> = _todaySnackbar.asStateFlow()
-
-    // 12 hour window for the curve
-    private val windowMinutes = 720f
-    private val expectedCurvePoints = listOf(
-        CurvePoint(0.000f, 0.05f),
-        CurvePoint(0.050f, 0.20f),
-        CurvePoint(0.125f, 1.00f),
-        CurvePoint(0.250f, 0.95f),
-        CurvePoint(0.375f, 0.85f),
-        CurvePoint(0.500f, 0.70f),
-        CurvePoint(0.625f, 0.50f),
-        CurvePoint(0.750f, 0.35f),
-        CurvePoint(0.875f, 0.20f),
-        CurvePoint(1.000f, 0.10f),
+    data class LocalChanges(val metrics: List<CheckInMetric>, val notes: String)
+    private data class CurrentMedication(val name: String, val doseMg: Int)
+    private data class Edits(
+        val availableTags: List<String>,
+        val selectedTags: Set<String>,
+        val local: LocalChanges?,
     )
+
+    private val currentMedication = combine(_medicationName, _doseMg) { name, dose ->
+        CurrentMedication(name, dose)
+    }
+    private val edits = combine(_availableTags, _selectedTags, _localChanges) { available, selected, local ->
+        Edits(available, selected, local)
+    }
 
     val todayContent: StateFlow<ScreenContentState<TodayContent>> = _selectedDate
         .flatMapLatest { date ->
-            val start = getStartOfDay(date)
-            val end = getEndOfDay(date)
             combine(
-                doseDao.getByDate(start, end).map { it.lastOrNull() },
-                checkInDao.getByDate(start, end),
-                _availableTags,
-                _selectedTags,
-                _localChanges,
-                _plannedMedicationName,
-                _plannedDoseMg
-            ) { args: Array<Any?> ->
-                val dose = args[0] as MedicationDose?
-                val checkIns = args[1] as List<CheckInLog>
-                val available = args[2] as List<String>
-                val selected = args[3] as Set<String>
-                val local = args[4] as LocalChanges?
-                val plannedName = args[5] as String
-                val plannedDose = args[6] as Int
-
-                val baseContent = FocusLogRepository.loadToday()
-                
-                val actualCurve = if (dose != null) {
-                    checkIns.map { log ->
-                        val x = (log.timestamp - dose.takenAt).toFloat() / (windowMinutes * 60000f)
-                        val y = log.focusLevel / 100f
-                        CurvePoint(x.coerceIn(0f, 1f), y)
-                    }.sortedBy { it.x }
-                } else emptyList()
-
-                val medication = dose?.let {
-                    baseContent.medication.copy(
-                        name = plannedName,
-                        dosage = "${plannedDose}mg • ${it.releaseType}",
-                        status = MedicationStatus.Taken
+                doseDao.getByDate(startOf(date), endExclusive(date) - 1),
+                currentMedication,
+                edits,
+            ) { doses, current, edit ->
+                val latest = doses.lastOrNull()
+                val medication = latest?.let {
+                    MedicationSummary(
+                        name = it.medicationName,
+                        dosage = "${it.doseMg} mg • ${it.releaseType}",
+                        status = MedicationStatus.Taken,
                     )
-                } ?: baseContent.medication.copy(
-                    name = plannedName,
-                    dosage = "${plannedDose}mg",
-                    status = MedicationStatus.Due
+                } ?: MedicationSummary(
+                    name = current.name.ifBlank {
+                        getApplication<Application>().getString(R.string.medication_not_configured)
+                    },
+                    dosage = if (current.doseMg in 1..200) "${current.doseMg} mg"
+                        else getApplication<Application>().getString(R.string.set_medication_dose),
+                    status = MedicationStatus.Due,
                 )
-
-                val tagOptions = available.map { label ->
-                    TagOption(label, selected.contains(label))
-                }
-
-                val content = baseContent.copy(
-                    medication = medication,
-                    lastTaken = dose?.let { formatTime(it.takenAt) } ?: "Not taken",
-                    doseTimestamp = dose?.takenAt,
-                    expectedCurve = expectedCurvePoints,
-                    actualCurve = actualCurve,
-                    metrics = local?.metrics ?: baseContent.metrics,
-                    tags = tagOptions,
-                    notes = local?.notes ?: baseContent.notes
+                val local = edit.local ?: defaultChanges()
+                ScreenContentState.Data(
+                    TodayContent(
+                        medication = medication,
+                        lastTaken = latest?.let { formatTime(it.takenAt) } ?: "Not taken",
+                        metrics = local.metrics,
+                        tags = edit.availableTags.map { TagOption(it, it in edit.selectedTags) },
+                        notes = local.notes,
+                    )
                 )
-                contentStateOf(content) { false }
             }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScreenContentState.Loading)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScreenContentState.Loading)
 
-    val hasUnsavedChanges: StateFlow<Boolean> = combine(_localChanges, _selectedTags) { local, selected ->
-        local != null || selected.isNotEmpty()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    // --- Insights Screen State & Logic ---
-    private val _selectedPeriod = MutableStateFlow(InsightsPeriod.Weekly)
-    val selectedPeriod: StateFlow<InsightsPeriod> = _selectedPeriod.asStateFlow()
-
-    val insightsContent: StateFlow<ScreenContentState<InsightsContent>> = _selectedPeriod
-        .flatMapLatest { period ->
-            // Use FocusLogRepository.loadInsights as base for mock data,
-            // but we could also derive this from real data here.
-            val base = FocusLogRepository.loadInsights(period)
-            combine(insightObservations, dailyFocusAverages) { observations, averages ->
-                val bars = if (averages.isNotEmpty() && period == InsightsPeriod.Weekly) {
-                    DayOfWeek.entries.map { day ->
-                        val avg = averages[day] ?: 0f
-                        TrendBar(
-                            label = day.name.take(3).lowercase().replaceFirstChar { it.uppercase() },
-                            value = avg,
-                            highlighted = avg > 0 && avg == averages.values.maxOrNull(),
-                            marker = if (avg > 0 && avg == averages.values.maxOrNull()) "Peak" else null
-                        )
-                    }
-                } else base.bars
-
-                val content = base.copy(
-                    cards = if (observations.isNotEmpty() && period == InsightsPeriod.Weekly) observations else base.cards,
-                    bars = bars
-                )
-                contentStateOf(content) { it.bars.isEmpty() }
-            }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScreenContentState.Loading)
-
-    fun selectPeriod(period: InsightsPeriod) {
-        _selectedPeriod.value = period
-    }
-
-    private val startOfDay: Long
-        get() = getStartOfDay(LocalDate.now())
-
-    private val endOfDay: Long
-        get() = getEndOfDay(LocalDate.now())
-
-    private val sevenDaysAgo: Long
-        get() = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -7)
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-
-    val todayDose: StateFlow<MedicationDose?> = doseDao.getLatest()
-        .map { dose ->
-            if (dose != null && dose.takenAt >= startOfDay) dose else null
+    val timelineEntries: StateFlow<List<ActivityEntry>> = _selectedDate.flatMapLatest { date ->
+        combine(
+            doseDao.getByDate(startOf(date), endExclusive(date) - 1),
+            checkInDao.getByDate(startOf(date), endExclusive(date) - 1),
+            sideEffectDao.getByDate(startOf(date), endExclusive(date) - 1),
+        ) { doses, checkIns, effects ->
+            (doses.map { ActivityEntry.DoseTaken(it) } +
+                checkIns.map { ActivityEntry.CheckInEntry(it, "Check-in") } +
+                effects.map { ActivityEntry.SideEffectEntry(it) })
+                .sortedBy { it.timestamp }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val todayCheckIns: StateFlow<List<CheckInLog>> = checkInDao.getByDate(startOfDay, endOfDay)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val hasUnsavedChanges = combine(_localChanges, _selectedTags) { local, tags ->
+        local != null || tags.isNotEmpty()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    val todaySideEffects: StateFlow<List<SideEffectLog>> = sideEffectDao.getByDate(startOfDay, endOfDay)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val timelineEntries: StateFlow<List<ActivityEntry>> = _selectedDate
-        .flatMapLatest { date ->
-            val start = getStartOfDay(date)
-            val end = getEndOfDay(date)
+    val insightsContent: StateFlow<ScreenContentState<InsightsContent>> = currentDate
+        .flatMapLatest { today ->
+            val start = startOf(today.minusDays(6))
+            val end = endExclusive(today)
             combine(
-                doseDao.getByDate(start, end),
-                checkInDao.getByDate(start, end),
-                sideEffectDao.getByDate(start, end)
-            ) { doses, checkIns, sideEffects ->
-                buildTimelineEntries(doses, checkIns, sideEffects)
+                doseDao.observeRange(start, end),
+                checkInDao.observeRange(start, end),
+            ) { doses, checkIns ->
+                val averages = checkIns.groupBy { localDate(it.timestamp) }
+                    .mapValues { (_, logs) -> logs.map { it.focusLevel }.average().toFloat() / 100f }
+                    .toSortedMap()
+                val maximum = averages.values.maxOrNull()
+                ScreenContentState.Data(
+                    InsightsContent(
+                        cards = InsightEngine.generateInsights(doses, checkIns, zone),
+                        bars = averages.map { (date, average) ->
+                            TrendBar(
+                                label = date.format(DateTimeFormatter.ofPattern("EEE")),
+                                value = average,
+                                highlighted = average == maximum,
+                            )
+                        },
+                    )
+                )
             }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScreenContentState.Loading)
 
-    val weeklyCheckIns: StateFlow<List<CheckInLog>> = checkInDao.getAllSince(sevenDaysAgo)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val weeklyDoses: StateFlow<List<MedicationDose>> = doseDao.getAllSince(sevenDaysAgo)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val dailyFocusAverages: StateFlow<Map<DayOfWeek, Float>> = weeklyCheckIns.map { logs ->
-        logs.groupBy { log ->
-            Instant.ofEpochMilli(log.timestamp)
-                .atZone(ZoneId.systemDefault())
-                .dayOfWeek
-        }.mapValues { (_, dayLogs) ->
-            dayLogs.map { it.focusLevel }.average().toFloat() / 100f
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
-
-    val insightObservations: StateFlow<List<InsightCard>> = combine(
-        weeklyDoses,
-        weeklyCheckIns
-    ) { doses, logs ->
-        InsightEngine.generateInsights(doses, logs)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    fun getExportText(): String {
-        val doses = weeklyDoses.value
-        val checkIns = weeklyCheckIns.value
-        val sb = StringBuilder()
-        sb.append("ADHS Logbook - Doctor's Report\n")
-        sb.append("----------------------------\n\n")
-
-        sb.append("MEDICATION DOSES:\n")
-        if (doses.isEmpty()) sb.append("No doses recorded in the last 7 days.\n")
-        doses.forEach { dose ->
-            val dt = Instant.ofEpochMilli(dose.takenAt).atZone(ZoneId.systemDefault())
-            sb.append("${dt.format(DateTimeFormatter.ofPattern("MMM d, HH:mm"))}: ${dose.medicationName} ${dose.doseMg}mg\n")
-        }
-
-        sb.append("\nCHECK-IN LOGS:\n")
-        if (checkIns.isEmpty()) sb.append("No check-ins recorded in the last 7 days.\n")
-        checkIns.forEach { log ->
-            val dt = Instant.ofEpochMilli(log.timestamp).atZone(ZoneId.systemDefault())
-            sb.append("${dt.format(DateTimeFormatter.ofPattern("MMM d, HH:mm"))} -> Focus: ${log.focusLevel}%, Mood: ${log.moodLevel}%, Energy: ${log.energyLevel}%\n")
-            if (log.tags.isNotEmpty()) sb.append("Tags: ${log.tags}\n")
-            if (log.notes.isNotEmpty()) sb.append("Notes: ${log.notes}\n")
-            sb.append("---\n")
-        }
-
-        return sb.toString()
+    fun saveMedication(name: String, dose: Int) {
+        val trimmed = name.trim()
+        if (trimmed.isBlank() || dose !in 1..200) return
+        prefs.edit().putString(KEY_MEDICATION, trimmed).putInt(KEY_DOSE, dose).apply()
+        _medicationName.value = trimmed
+        _doseMg.value = dose
+        _snackbar.value = getApplication<Application>().getString(R.string.medication_saved)
     }
 
-    fun updatePlannedMedicationName(name: String) {
-        _plannedMedicationName.value = name
+    fun selectDate(date: LocalDate) {
+        if (date.isAfter(currentDate.value)) return
+        _selectedDate.value = date
+        clearEdits()
     }
 
-    fun updatePlannedDose(doseMg: Int) {
-        _plannedDoseMg.value = doseMg
-    }
-
-    fun logDose(medicationName: String, doseMg: Int, takenAt: Long) {
+    fun logDose() {
+        val date = _selectedDate.value
+        val name = _medicationName.value.trim()
+        val dose = _doseMg.value
+        if (date.isAfter(currentDate.value) || name.isBlank() || dose !in 1..200) return
+        if (!_doseSaving.compareAndSet(expect = false, update = true)) return
         viewModelScope.launch {
-            doseDao.insert(
-                MedicationDose(
-                    medicationName = medicationName,
-                    doseMg = doseMg,
-                    takenAt = takenAt
+            try {
+                doseDao.insert(
+                    MedicationDose(
+                        medicationName = name,
+                        doseMg = dose,
+                        takenAt = timestampFor(date),
+                        releaseType = getApplication<Application>()
+                            .getString(R.string.release_type_unspecified),
+                    )
                 )
-            )
-            _todaySnackbar.value = "Dose logged ✓"
+                _snackbar.value = getApplication<Application>().getString(R.string.dose_logged)
+            } finally {
+                _doseSaving.value = false
+            }
         }
     }
 
-    fun logCheckIn(focus: Int, mood: Int, energy: Int, notes: String) {
+    fun logCheckIn() {
+        val date = _selectedDate.value
+        if (date.isAfter(currentDate.value)) return
+        val changes = _localChanges.value ?: defaultChanges()
+        val tags = _selectedTags.value
+        if (!_checkInSaving.compareAndSet(expect = false, update = true)) return
         viewModelScope.launch {
-            val tagsString = _selectedTags.value.joinToString(",")
-            val start = getStartOfDay(LocalDate.now())
-            val end = getEndOfDay(LocalDate.now())
-            val latestDose = doseDao.getByDate(start, end).first().lastOrNull()
-            checkInDao.insert(
-                CheckInLog(
-                    timestamp = System.currentTimeMillis(),
-                    focusLevel = focus,
-                    moodLevel = mood,
-                    energyLevel = energy,
-                    tags = tagsString,
-                    notes = notes,
-                    linkedDoseId = latestDose?.id
+            try {
+                val timestamp = timestampFor(date)
+                val latestDose = doseDao.getByDate(startOf(date), endExclusive(date) - 1)
+                    .first().lastOrNull { it.takenAt <= timestamp }
+                fun metric(type: MetricType) =
+                    ((changes.metrics.first { it.type == type }.value * 100).toInt()).coerceIn(0, 100)
+                checkInDao.insert(
+                    CheckInLog(
+                        timestamp = timestamp,
+                        focusLevel = metric(MetricType.Focus),
+                        moodLevel = metric(MetricType.Mood),
+                        energyLevel = metric(MetricType.Energy),
+                        tags = tags.joinToString(","),
+                        notes = changes.notes.trim(),
+                        linkedDoseId = latestDose?.id,
+                    )
                 )
-            )
-            _selectedTags.value = emptySet()
-            _localChanges.value = null
-            _todaySnackbar.value = "Check-in logged ✓"
+                clearEdits()
+                _snackbar.value = getApplication<Application>().getString(R.string.checkin_logged)
+            } finally {
+                _checkInSaving.value = false
+            }
         }
     }
 
     fun logSideEffect(effectName: String) {
+        val date = _selectedDate.value
+        val effect = effectName.trim()
+        if (date.isAfter(currentDate.value) || effect.isBlank()) return
         viewModelScope.launch {
-            val start = getStartOfDay(LocalDate.now())
-            val end = getEndOfDay(LocalDate.now())
-            val latestDose = doseDao.getByDate(start, end).map { it.lastOrNull() }.stateIn(viewModelScope).value
+            val timestamp = timestampFor(date)
+            val latestDose = doseDao.getByDate(startOf(date), endExclusive(date) - 1)
+                .first().lastOrNull { it.takenAt <= timestamp }
             sideEffectDao.insert(
                 SideEffectLog(
-                    timestamp = System.currentTimeMillis(),
-                    effectName = effectName,
-                    linkedDoseId = latestDose?.id
+                    timestamp = timestamp,
+                    effectName = effect,
+                    linkedDoseId = latestDose?.id,
                 )
             )
-            _todaySnackbar.value = "Side effect logged ✓"
+            _snackbar.value = getApplication<Application>().getString(R.string.side_effect_logged)
         }
     }
 
-    fun updateMetric(type: MetricType, value: Float) {
-        updateLocal { current ->
-            val updatedMetrics = current.metrics.map { metric ->
-                if (metric.type == type) {
-                    metric.copy(value = value, descriptor = descriptorFor(type, value))
-                } else {
-                    metric
-                }
-            }
-            current.copy(metrics = updatedMetrics)
-        }
+    fun updateMetric(type: MetricType, value: Float) = updateLocal { current ->
+        current.copy(metrics = current.metrics.map {
+            if (it.type == type) it.copy(value = value, descriptor = descriptor(value)) else it
+        })
     }
 
-    fun toggleTag(label: String) {
-        _selectedTags.update { current ->
-            if (current.contains(label)) current - label else current + label
-        }
-    }
-
-    fun addTag(label: String) {
-        if (label.isBlank()) return
+    fun updateNotes(notes: String) = updateLocal { it.copy(notes = notes) }
+    fun toggleTag(tag: String) = _selectedTags.update { if (tag in it) it - tag else it + tag }
+    fun addTag(tag: String) {
+        val value = tag.trim()
+        if (value.isBlank()) return
         _availableTags.update { current ->
-            if (!current.contains(label)) {
-                val newList = (current + label).sorted()
-                saveTags(newList)
-                newList
-            } else current
+            (current + value).distinct().sorted().also {
+                prefs.edit().putStringSet(KEY_TAGS, it.toSet()).apply()
+            }
         }
-        _selectedTags.update { it + label }
+        _selectedTags.update { it + value }
     }
 
-    fun updateNotes(text: String) {
-        updateLocal { it.copy(notes = text) }
-    }
-
-    fun selectDate(date: LocalDate) {
-        _selectedDate.value = date
-        _localChanges.value = null
-    }
-
-    fun addQuickNote(note: String) {
-        viewModelScope.launch {
-            checkInDao.insert(
-                CheckInLog(
-                    timestamp = System.currentTimeMillis(),
-                    focusLevel = 50,
-                    moodLevel = 50,
-                    energyLevel = 50,
-                    tags = "",
-                    notes = note,
-                    linkedDoseId = null
-                )
-            )
-            _todaySnackbar.value = "Note added ✓"
+    suspend fun createExportText(): String {
+        val endDate = LocalDate.now()
+        val startDate = endDate.minusDays(6)
+        val start = startOf(startDate)
+        val end = endExclusive(endDate)
+        val doses = doseDao.getRange(start, end)
+        val checkIns = checkInDao.getRange(start, end)
+        val effects = sideEffectDao.getRange(start, end)
+        val context = getApplication<Application>()
+        val dateFormat = DateFormat.getDateFormat(context)
+        val timeFormat = DateFormat.getTimeFormat(context)
+        fun whenText(timestamp: Long) =
+            "${dateFormat.format(Date(timestamp))} ${timeFormat.format(Date(timestamp))}"
+        return buildString {
+            appendLine("ADHS Logbook — 7-day report")
+            appendLine("${dateFormat.format(Date(start))} – ${dateFormat.format(Date(end - 1))}")
+            appendLine("Time zone: ${zone.id}")
+            appendLine()
+            appendLine("MEDICATION")
+            if (doses.isEmpty()) appendLine("No doses recorded.")
+            doses.forEach {
+                appendLine("${whenText(it.takenAt)}: ${it.medicationName}, ${it.doseMg} mg, ${it.releaseType}")
+            }
+            appendLine()
+            appendLine("CHECK-INS")
+            if (checkIns.isEmpty()) appendLine("No check-ins recorded.")
+            checkIns.forEach {
+                appendLine("${whenText(it.timestamp)}: focus ${it.focusLevel}, mood ${it.moodLevel}, energy ${it.energyLevel}")
+                if (it.tags.isNotBlank()) appendLine("Tags: ${it.tags}")
+                if (it.notes.isNotBlank()) appendLine("Notes: ${it.notes}")
+            }
+            appendLine()
+            appendLine("SIDE EFFECTS")
+            if (effects.isEmpty()) appendLine("No side effects recorded.")
+            effects.forEach { appendLine("${whenText(it.timestamp)}: ${it.effectName}") }
         }
     }
 
-    fun consumeSnackbar() {
-        _todaySnackbar.value = null
-    }
+    fun consumeSnackbar() { _snackbar.value = null }
 
     private fun updateLocal(transform: (LocalChanges) -> LocalChanges) {
-        val currentContent = (todayContent.value as? ScreenContentState.Data)?.value
-        val base = _localChanges.value ?: currentContent?.let {
-            LocalChanges(it.metrics, it.notes)
-        } ?: return
-        _localChanges.value = transform(base)
+        _localChanges.value = transform(_localChanges.value ?: defaultChanges())
     }
 
-    private fun getStartOfDay(date: LocalDate): Long = 
-        date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
-    private fun getEndOfDay(date: LocalDate): Long = 
-        date.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() - 1
-
-    private fun formatTime(timestamp: Long): String {
-        val date = java.time.Instant.ofEpochMilli(timestamp)
-            .atZone(java.time.ZoneId.systemDefault())
-            .toLocalTime()
-        val formatter = java.time.format.DateTimeFormatter.ofPattern("hh:mm a", Locale.US)
-        return date.format(formatter)
+    private fun clearEdits() {
+        _localChanges.value = null
+        _selectedTags.value = emptySet()
     }
 
-    private fun descriptorFor(type: MetricType, value: Float): String = when (type) {
-        MetricType.Focus -> when {
-            value < 0.34f -> "Low"
-            value < 0.67f -> "Steady"
-            value < 0.85f -> "Good"
-            else -> "Locked in"
-        }
-        MetricType.Mood -> when {
-            value < 0.34f -> "Low"
-            value < 0.67f -> "Neutral"
-            value < 0.85f -> "Good"
-            else -> "Great"
-        }
-        MetricType.Energy -> when {
-            value < 0.34f -> "Low"
-            value < 0.67f -> "Moderate"
-            value < 0.85f -> "High"
-            else -> "Very high"
-        }
+    private fun defaultChanges() = LocalChanges(
+        metrics = MetricType.entries.map { CheckInMetric(it, 0.5f, descriptor(0.5f)) },
+        notes = "",
+    )
+
+    private fun descriptor(value: Float) = when {
+        value < .34f -> "Low"
+        value < .67f -> "Medium"
+        else -> "High"
     }
 
-    private fun buildTimelineEntries(
-        doses: List<MedicationDose>,
-        checkIns: List<CheckInLog>,
-        sideEffects: List<SideEffectLog>
-    ): List<ActivityEntry> {
-        val entries = mutableListOf<ActivityEntry>()
-        
-        entries.addAll(doses.map { ActivityEntry.DoseTaken(it) })
-        entries.addAll(checkIns.map { log ->
-            val label = when {
-                log.focusLevel > 80 -> "Peak Effect"
-                log.notes.isNotEmpty() -> "Quick note"
-                else -> "Check-in"
-            }
-            ActivityEntry.CheckInEntry(log, label)
-        })
-        entries.addAll(sideEffects.map { ActivityEntry.SideEffectEntry(it) })
+    private fun loadTags() =
+        prefs.getStringSet(KEY_TAGS, null)?.toList()?.sorted()
+            ?: listOf("Calm", "Good focus", "No effect", "Restless")
 
-        return entries.sortedByDescending { it.timestamp }
+    private fun timestampFor(date: LocalDate) =
+        date.atTime(LocalTime.now()).atZone(zone).toInstant().toEpochMilli()
+
+    private fun startOf(date: LocalDate) = date.atStartOfDay(zone).toInstant().toEpochMilli()
+    private fun endExclusive(date: LocalDate) = startOf(date.plusDays(1))
+    private fun localDate(timestamp: Long) = Instant.ofEpochMilli(timestamp).atZone(zone).toLocalDate()
+    private fun formatTime(timestamp: Long) =
+        DateFormat.getTimeFormat(getApplication()).format(Date(timestamp))
+
+    private companion object {
+        const val PREFS = "adhs_logbook_prefs"
+        const val KEY_MEDICATION = "medication_name"
+        const val KEY_DOSE = "medication_dose_mg"
+        const val KEY_TAGS = "available_tags"
+        const val DATE_REFRESH_MILLIS = 60_000L
     }
 }

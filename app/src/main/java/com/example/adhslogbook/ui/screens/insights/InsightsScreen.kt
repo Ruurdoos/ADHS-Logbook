@@ -1,50 +1,37 @@
 package com.example.adhslogbook.ui.screens.insights
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Lightbulb
-import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Button
-import androidx.compose.foundation.clickable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import android.content.Intent
-import com.example.adhslogbook.data.model.InsightCard
-import com.example.adhslogbook.data.model.InsightCardStyle
 import com.example.adhslogbook.data.model.InsightsContent
-import com.example.adhslogbook.data.model.InsightsPeriod
-import com.example.adhslogbook.data.model.TrendBar
+import com.example.adhslogbook.R
 import com.example.adhslogbook.navigation.FocusLogDestination
 import com.example.adhslogbook.navigation.ProductDestinations
 import com.example.adhslogbook.ui.components.FocusLogBottomBar
@@ -52,7 +39,7 @@ import com.example.adhslogbook.ui.components.FocusLogTopBar
 import com.example.adhslogbook.ui.components.ScreenStateHost
 import com.example.adhslogbook.ui.theme.FocusLogTheme
 import com.example.adhslogbook.ui.viewmodels.LogbookViewModel
-import java.time.DayOfWeek
+import kotlinx.coroutines.launch
 
 @Composable
 fun InsightsRoute(
@@ -61,49 +48,35 @@ fun InsightsRoute(
     onNavigate: (FocusLogDestination) -> Unit,
     onHomeClick: () -> Unit,
 ) {
-    val uiState by viewModel.insightsContent.collectAsStateWithLifecycle()
-    val selectedPeriod by viewModel.selectedPeriod.collectAsStateWithLifecycle()
+    val state by viewModel.insightsContent.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val snackbarHostState = remember { SnackbarHostState() }
-
+    val scope = rememberCoroutineScope()
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            FocusLogTopBar(
-                onHomeClick = onHomeClick,
-                onSettingsClick = {},
-            )
-        },
-        bottomBar = {
-            FocusLogBottomBar(
-                items = ProductDestinations,
-                currentDestination = currentDestination,
-                onNavigate = onNavigate,
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-    ) { innerPadding ->
+        topBar = { FocusLogTopBar(onHomeClick) },
+        bottomBar = { FocusLogBottomBar(ProductDestinations, currentDestination, onNavigate) },
+    ) { padding ->
         ScreenStateHost(
-            state = uiState,
-            onRetry = { /* viewModel::retry */ },
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize(),
-            loadingMessage = "Loading insights",
-            emptyMessage = "Insights will appear after a few days of tracking.",
+            state = state,
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            loadingMessage = stringResource(R.string.loading_weekly_insights),
+            emptyMessage = stringResource(R.string.no_weekly_checkins),
         ) { content ->
-            InsightsScreen(
+            InsightsContent(
                 content = content,
-                selectedPeriod = selectedPeriod,
-                contentPadding = innerPadding,
-                onSelectPeriod = viewModel::selectPeriod,
+                modifier = Modifier.fillMaxSize(),
                 onExport = {
-                    val exportText = viewModel.getExportText()
-                    val intent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT, exportText)
+                    scope.launch {
+                        val report = viewModel.createExportText()
+                        context.startActivity(
+                            Intent.createChooser(
+                                Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, report)
+                                },
+                                context.getString(R.string.export_for_doctor),
+                            )
+                        )
                     }
-                    context.startActivity(Intent.createChooser(intent, "Export for Doctor"))
                 },
             )
         }
@@ -111,333 +84,87 @@ fun InsightsRoute(
 }
 
 @Composable
-private fun InsightsScreen(
-    content: InsightsContent,
-    selectedPeriod: InsightsPeriod,
-    contentPadding: PaddingValues,
-    onSelectPeriod: (InsightsPeriod) -> Unit,
-    onExport: () -> Unit,
-) {
+private fun InsightsContent(content: InsightsContent, modifier: Modifier, onExport: () -> Unit) {
     val spacing = FocusLogTheme.spacing
-
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = spacing.page,
-            top = spacing.lg,
-            end = spacing.page,
-            bottom = contentPadding.calculateBottomPadding() + spacing.lg,
-        ),
-        verticalArrangement = Arrangement.spacedBy(spacing.xl),
+        modifier = modifier,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(spacing.page),
+        verticalArrangement = Arrangement.spacedBy(spacing.lg),
     ) {
         item {
-            PeriodSelector(
-                selectedPeriod = selectedPeriod,
-                onSelectPeriod = onSelectPeriod,
+            Text(stringResource(R.string.weekly_insights), style = MaterialTheme.typography.headlineMedium)
+            Text(
+                stringResource(R.string.weekly_basis),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
+            Button(onClick = onExport) {
+                Icon(Icons.Outlined.Share, contentDescription = null)
+                Text(stringResource(R.string.export_report))
+            }
+        }
+        if (content.cards.isEmpty()) {
+            item {
                 Text(
-                    text = content.title,
-                    style = MaterialTheme.typography.headlineLarge,
-                )
-                Text(
-                    text = content.subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
+                    stringResource(R.string.insight_minimum),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-
-        item {
-            Button(
-                onClick = onExport,
-                shape = CircleShape,
-            ) {
-                Icon(Icons.Outlined.Share, contentDescription = null)
-                Text(
-                    text = "Export for Doctor",
-                    modifier = Modifier.padding(start = 8.dp),
-                )
-            }
-        }
-
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(spacing.md)) {
-                content.cards.forEach { card ->
-                    InsightCardItem(card = card)
-                }
-            }
-        }
-
-        item {
-            TrendChartCard(content = content)
-        }
-    }
-}
-
-@Composable
-private fun PeriodSelector(
-    selectedPeriod: InsightsPeriod,
-    onSelectPeriod: (InsightsPeriod) -> Unit,
-) {
-    Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            InsightsPeriod.entries.forEach { period ->
-                val selected = period == selectedPeriod
-                Surface(
-                    modifier = Modifier.weight(1f),
-                    shape = CircleShape,
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.surface
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
-                    tonalElevation = if (selected) 1.dp else 0.dp,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelectPeriod(period) }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = period.label,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        )
+        } else {
+            content.cards.forEach { card ->
+                item {
+                    Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+                            Text(card.title, style = MaterialTheme.typography.titleMedium)
+                            Text(card.message, style = MaterialTheme.typography.bodyLarge)
+                        }
                     }
                 }
             }
         }
+        if (content.bars.isEmpty()) {
+            item {
+                Text(
+                    stringResource(R.string.no_weekly_checkins),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            item { WeeklyBars(content) }
+        }
     }
 }
 
 @Composable
-private fun InsightCardItem(card: InsightCard) {
-    val isPrimary = card.style == InsightCardStyle.Primary
-    Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = if (isPrimary) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
-        tonalElevation = if (isPrimary) 0.dp else 1.dp,
-        shadowElevation = if (isPrimary) 0.dp else 1.dp,
-    ) {
+private fun WeeklyBars(content: InsightsContent) {
+    Surface(shape = RoundedCornerShape(22.dp), tonalElevation = 1.dp) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
+            Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Text(stringResource(R.string.average_daily_focus), style = MaterialTheme.typography.titleLarge)
             Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().height(180.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.Bottom,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .background(
-                            color = if (isPrimary) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainerHigh
-                            },
-                            shape = CircleShape,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = if (isPrimary) {
-                            Icons.Outlined.Lightbulb
-                        } else {
-                            Icons.Outlined.Restaurant
-                        },
-                        contentDescription = null,
-                        tint = if (isPrimary) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.secondary
-                        },
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-                Text(
-                    text = card.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (isPrimary) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
-
-            Text(
-                text = card.message,
-                style = MaterialTheme.typography.titleLarge,
-                color = if (isPrimary) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun TrendChartCard(content: InsightsContent) {
-    val spacing = FocusLogTheme.spacing
-    Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
-        shadowElevation = 1.dp,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(spacing.md),
-        ) {
-            Text(
-                text = content.trendTitle,
-                style = MaterialTheme.typography.titleLarge,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Average Daily Focus",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.outline,
-                )
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                ) {
-                    Text(
-                        text = content.trendWindowLabel,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(220.dp)
-                        .padding(16.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .fillMaxSize(),
-                        verticalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        listOf("High", "Med", "Low").forEach { label ->
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.outline,
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .fillMaxWidth()
-                            .padding(start = 28.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        content.bars.forEach { bar ->
-                            TrendBarItem(bar = bar)
-                        }
+                content.bars.forEach { bar ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            Modifier
+                                .width(28.dp)
+                                .height((bar.value.coerceIn(0f, 1f) * 130f).dp)
+                                .background(
+                                    if (bar.highlighted) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.secondary,
+                                    RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
+                                )
+                        )
+                        Text(bar.label, style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun TrendBarItem(bar: TrendBar) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .height(150.dp),
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            if (bar.marker != null) {
-                Surface(
-                    modifier = Modifier.align(Alignment.TopCenter),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ) {
-                    Text(
-                        text = bar.marker,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .width(24.dp)
-                    .height((bar.value * 120f).dp)
-                    .background(
-                        color = if (bar.highlighted) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
-                        },
-                        shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
-                    )
-            )
-        }
-
-        Text(
-            text = bar.label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (bar.highlighted) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.outline
-            },
-            fontWeight = if (bar.highlighted) FontWeight.Bold else FontWeight.Medium,
-        )
     }
 }

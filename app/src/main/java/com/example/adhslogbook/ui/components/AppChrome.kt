@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -58,7 +56,6 @@ fun AvatarBadge(
 @Composable
 fun FocusLogTopBar(
     onHomeClick: () -> Unit,
-    onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
     initials: String = "A",
 ) {
@@ -73,7 +70,7 @@ fun FocusLogTopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = FocusLogTheme.spacing.page, vertical = FocusLogTheme.spacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
@@ -91,25 +88,6 @@ fun FocusLogTopBar(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
-            }
-
-            Surface(
-                modifier = Modifier
-                    .size(FocusLogTheme.spacing.touchTarget)
-                    .clip(CircleShape)
-                    .clickable(onClick = onSettingsClick),
-                color = Color.Transparent,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Settings,
-                        contentDescription = "Settings",
-                    )
-                }
             }
         }
     }

@@ -1,65 +1,48 @@
 package com.example.adhslogbook.ui.screens.timeline
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.outlined.Notes
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.LocalPharmacy
-import androidx.compose.material.icons.outlined.Restaurant
-import androidx.compose.material.icons.outlined.WarningAmber
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.adhslogbook.data.model.ActivityEntry
-import com.example.adhslogbook.data.model.CurvePoint
-import com.example.adhslogbook.data.model.SideEffectItem
-import com.example.adhslogbook.data.model.TimelineDay
-import com.example.adhslogbook.data.model.TimelineEvent
-import com.example.adhslogbook.data.model.TimelineEventType
+import com.example.adhslogbook.R
 import com.example.adhslogbook.navigation.FocusLogDestination
 import com.example.adhslogbook.navigation.ProductDestinations
 import com.example.adhslogbook.ui.components.FocusLogBottomBar
 import com.example.adhslogbook.ui.components.FocusLogTopBar
-import com.example.adhslogbook.ui.state.ScreenContentState
-import com.example.adhslogbook.ui.theme.FocusLogPalette
 import com.example.adhslogbook.ui.theme.FocusLogTheme
 import com.example.adhslogbook.ui.viewmodels.LogbookViewModel
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Date
 
 @Composable
 fun TimelineRoute(
@@ -68,476 +51,155 @@ fun TimelineRoute(
     onNavigate: (FocusLogDestination) -> Unit,
     onHomeClick: () -> Unit,
 ) {
-    val todayContentState by viewModel.todayContent.collectAsStateWithLifecycle()
-    val timelineEntries by viewModel.timelineEntries.collectAsStateWithLifecycle()
-    val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    val content = remember(timelineEntries, selectedDate, todayContentState) {
-        val todayData = (todayContentState as? ScreenContentState.Data)?.value
-        TimelineDay(
-            dateLabel = selectedDate.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMM d")),
-            subtitle = "Daily Summary",
-            actualCurve = todayData?.actualCurve ?: emptyList(),
-            expectedCurve = todayData?.expectedCurve ?: emptyList(),
-            events = timelineEntries.map { entry ->
-                when (entry) {
-                    is ActivityEntry.DoseTaken -> TimelineEvent(
-                        id = "dose-${entry.timestamp}",
-                        time = formatTime(entry.timestamp),
-                        title = "Dose Taken",
-                        type = TimelineEventType.Dose
-                    )
-                    is ActivityEntry.CheckInEntry -> TimelineEvent(
-                        id = "checkin-${entry.timestamp}",
-                        time = formatTime(entry.timestamp),
-                        title = entry.label,
-                        description = entry.log.notes,
-                        type = TimelineEventType.Focus
-                    )
-                    is ActivityEntry.SideEffectEntry -> TimelineEvent(
-                        id = "se-${entry.timestamp}",
-                        time = formatTime(entry.timestamp),
-                        title = "Side Effect",
-                        description = entry.log.effectName,
-                        type = TimelineEventType.SideEffect
-                    )
-                }
-            },
-            sideEffects = timelineEntries.filterIsInstance<ActivityEntry.SideEffectEntry>().map {
-                SideEffectItem(it.log.effectName)
-            }
-        )
-    }
-
+    val entries by viewModel.timelineEntries.collectAsStateWithLifecycle()
+    val date by viewModel.selectedDate.collectAsStateWithLifecycle()
+    val currentDate by viewModel.currentDate.collectAsStateWithLifecycle()
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            FocusLogTopBar(
-                onHomeClick = onHomeClick,
-                onSettingsClick = {},
-            )
-        },
-        bottomBar = {
-            FocusLogBottomBar(
-                items = ProductDestinations,
-                currentDestination = currentDestination,
-                onNavigate = onNavigate,
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { viewModel.addQuickNote("Manual entry") },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                shape = RoundedCornerShape(20.dp),
-            ) {
-                Icon(Icons.Outlined.Add, contentDescription = "Add event")
-            }
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-    ) { innerPadding ->
-        TimelineScreen(
-            content = content,
-            contentPadding = innerPadding,
-            hasPrevious = true,
-            hasNext = true,
-            onPrevious = { viewModel.selectDate(selectedDate.minusDays(1)) },
-            onNext = { viewModel.selectDate(selectedDate.plusDays(1)) },
+        topBar = { FocusLogTopBar(onHomeClick) },
+        bottomBar = { FocusLogBottomBar(ProductDestinations, currentDestination, onNavigate) },
+    ) { padding ->
+        TimelineContent(
+            entries = entries,
+            date = date,
+            currentDate = currentDate,
+            onDateChange = viewModel::selectDate,
+            modifier = Modifier.padding(padding).fillMaxSize(),
         )
     }
 }
 
-private fun formatTime(timestamp: Long): String {
-    val date = java.time.Instant.ofEpochMilli(timestamp)
-        .atZone(java.time.ZoneId.systemDefault())
-        .toLocalTime()
-    val formatter = java.time.format.DateTimeFormatter.ofPattern("hh:mm a", java.util.Locale.US)
-    return date.format(formatter)
-}
-
 @Composable
-private fun TimelineScreen(
-    content: TimelineDay,
-    contentPadding: PaddingValues,
-    hasPrevious: Boolean,
-    hasNext: Boolean,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
+private fun TimelineContent(
+    entries: List<ActivityEntry>,
+    date: LocalDate,
+    currentDate: LocalDate,
+    onDateChange: (LocalDate) -> Unit,
+    modifier: Modifier,
 ) {
     val spacing = FocusLogTheme.spacing
-
+    val firstDose = entries.filterIsInstance<ActivityEntry.DoseTaken>().minByOrNull { it.timestamp }
+    val chartLogs = entries.filterIsInstance<ActivityEntry.CheckInEntry>()
+        .filter { firstDose != null && it.timestamp >= firstDose.timestamp }
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = spacing.page,
-            top = spacing.lg,
-            end = spacing.page,
-            bottom = contentPadding.calculateBottomPadding() + spacing.xxl,
-        ),
-        verticalArrangement = Arrangement.spacedBy(spacing.xl),
+        modifier = modifier,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(spacing.page),
+        verticalArrangement = Arrangement.spacedBy(spacing.lg),
     ) {
-        item {
-            TimelineDaySwitcher(
-                dateLabel = content.dateLabel,
-                subtitle = content.subtitle,
-                hasPrevious = hasPrevious,
-                hasNext = hasNext,
-                onPrevious = onPrevious,
-                onNext = onNext,
-            )
+        item { DateSwitcher(date, currentDate, onDateChange) }
+        if (firstDose != null && chartLogs.isNotEmpty()) {
+            item { FocusChart(firstDose.timestamp, chartLogs) }
         }
-
-        item {
-            TimelineCurveCard(
-                actualCurve = content.actualCurve,
-                expectedCurve = content.expectedCurve,
-            )
-        }
-
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(spacing.md)) {
-                Text(text = "Activity Log", style = MaterialTheme.typography.titleLarge)
-                Column(verticalArrangement = Arrangement.spacedBy(spacing.md)) {
-                    content.events.forEachIndexed { index, event ->
-                        TimelineEventItem(
-                            event = event,
-                            showConnector = index != content.events.lastIndex,
-                        )
-                    }
-                }
-            }
-        }
-
-        item {
-            SideEffectsCard(items = content.sideEffects)
+        item { Text(stringResource(R.string.activity_log), style = MaterialTheme.typography.titleLarge) }
+        if (entries.isEmpty()) {
+            item { Text(stringResource(R.string.no_date_records), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        } else {
+            entries.forEach { entry -> item(key = "${entry::class.simpleName}-${entry.timestamp}") {
+                TimelineRecord(entry)
+            } }
         }
     }
 }
 
 @Composable
-private fun TimelineDaySwitcher(
-    dateLabel: String,
-    subtitle: String,
-    hasPrevious: Boolean,
-    hasNext: Boolean,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-) {
-    Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onPrevious, enabled = hasPrevious) {
-                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, contentDescription = "Previous day")
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(dateLabel, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onNext, enabled = hasNext) {
-                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = "Next day")
-            }
-        }
-    }
-}
-
-@Composable
-private fun TimelineCurveCard(
-    actualCurve: List<CurvePoint>,
-    expectedCurve: List<CurvePoint>,
-) {
-    val spacing = FocusLogTheme.spacing
-    val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-    val actualColor = MaterialTheme.colorScheme.primary
-    val expectedColor = FocusLogPalette.Tertiary.copy(alpha = 0.55f)
-    Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
-        shadowElevation = 1.dp,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(spacing.md),
-        ) {
-            Text(
-                text = "Effectiveness Curve",
-                style = MaterialTheme.typography.titleLarge,
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(280.dp)
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    repeat(4) { row ->
-                        val y = size.height * row / 3f
-                        drawLine(
-                            color = gridColor,
-                            start = Offset(0f, y),
-                            end = Offset(size.width, y),
-                            strokeWidth = 2f,
-                        )
-                    }
-
-                    drawPath(
-                        path = curveToPath(expectedCurve, size.width, size.height),
-                        color = expectedColor,
-                        style = Stroke(
-                            width = 6f,
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 10f)),
-                            cap = StrokeCap.Round,
-                        ),
-                    )
-                    drawPath(
-                        path = curveToPath(actualCurve, size.width, size.height),
-                        color = actualColor,
-                        style = Stroke(width = 8f, cap = StrokeCap.Round),
-                    )
-                }
-
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    listOf("8:00", "12:00", "16:00", "20:00").forEach { label ->
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                LegendSwatch(
-                    label = "My Experience",
-                    color = MaterialTheme.colorScheme.primary,
-                    dashed = false,
-                )
-                LegendSwatch(
-                    label = "Expected",
-                    color = FocusLogPalette.Tertiary.copy(alpha = 0.55f),
-                    dashed = true,
-                    modifier = Modifier.padding(start = 24.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LegendSwatch(
-    label: String,
-    color: androidx.compose.ui.graphics.Color,
-    dashed: Boolean,
-    modifier: Modifier = Modifier,
+private fun DateSwitcher(
+    date: LocalDate,
+    today: LocalDate,
+    onDateChange: (LocalDate) -> Unit,
 ) {
     Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {
-        Canvas(
-            modifier = Modifier
-                .width(24.dp)
-                .height(6.dp)
-        ) {
-            drawLine(
-                color = color,
-                start = Offset(0f, size.height / 2f),
-                end = Offset(size.width, size.height / 2f),
-                strokeWidth = size.height,
-                cap = StrokeCap.Round,
-                pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 6f)) else null,
-            )
+        IconButton(onClick = { onDateChange(date.minusDays(1)) }) {
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, stringResource(R.string.previous_day))
         }
         Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)),
+            style = MaterialTheme.typography.titleMedium,
         )
-    }
-}
-
-@Composable
-private fun TimelineEventItem(
-    event: TimelineEvent,
-    showConnector: Boolean,
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .background(
-                        color = if (event.type == TimelineEventType.Dose) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                        shape = CircleShape,
-                    )
-            )
-            if (showConnector) {
-                Box(
-                    modifier = Modifier
-                        .padding(top = 4.dp)
-                        .width(2.dp)
-                        .height(72.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                )
-            }
-        }
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp,
-            shadowElevation = 1.dp,
+        IconButton(
+            onClick = { onDateChange(date.plusDays(1)) },
+            enabled = date.isBefore(today),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text = event.time,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = timelineIcon(event.type),
-                        contentDescription = null,
-                        tint = when (event.type) {
-                            TimelineEventType.Dose -> MaterialTheme.colorScheme.primary
-                            TimelineEventType.Focus -> MaterialTheme.colorScheme.secondary
-                            TimelineEventType.Meal -> FocusLogPalette.Tertiary
-                            TimelineEventType.SideEffect -> FocusLogPalette.Error
-                            TimelineEventType.Note -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                    Text(text = event.title, style = MaterialTheme.typography.titleMedium)
-                }
-                if (event.description.isNotBlank()) {
-                    Text(
-                        text = event.description,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, stringResource(R.string.next_day))
         }
     }
 }
 
 @Composable
-private fun SideEffectsCard(items: List<SideEffectItem>) {
-    val spacing = FocusLogTheme.spacing
-    Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-    ) {
+private fun FocusChart(firstDose: Long, logs: List<ActivityEntry.CheckInEntry>) {
+    val color = MaterialTheme.colorScheme.primary
+    val grid = MaterialTheme.colorScheme.outlineVariant
+    val elapsed = logs.map { (it.timestamp - firstDose).coerceAtLeast(0) / 60_000f }
+    val maximum = elapsed.maxOrNull()?.coerceAtLeast(1f) ?: 1f
+    Surface(shape = RoundedCornerShape(24.dp), tonalElevation = 1.dp) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(spacing.md),
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = "Side Effects Noted",
-                style = MaterialTheme.typography.titleLarge,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
-                items.forEach { item ->
-                    Surface(
-                        shape = CircleShape,
-                        color = if (item.highlighted) {
-                            FocusLogPalette.ErrorContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.WarningAmber,
-                                contentDescription = null,
-                                tint = if (item.highlighted) {
-                                    FocusLogPalette.OnErrorContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Text(
-                                text = item.label,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (item.highlighted) {
-                                    FocusLogPalette.OnErrorContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
-                        }
+            Text(stringResource(R.string.recorded_focus), style = MaterialTheme.typography.titleMedium)
+            Box(Modifier.fillMaxWidth().height(180.dp)) {
+                Canvas(Modifier.fillMaxSize()) {
+                    repeat(3) { index ->
+                        val y = size.height * index / 2f
+                        drawLine(grid, Offset(0f, y), Offset(size.width, y))
                     }
+                    val points = logs.mapIndexed { index, entry ->
+                        Offset(
+                            x = size.width * elapsed[index] / maximum,
+                            y = size.height * (1f - entry.log.focusLevel.coerceIn(0, 100) / 100f),
+                        )
+                    }
+                    points.zipWithNext().forEach { (start, end) ->
+                        drawLine(color, start, end, strokeWidth = 7f, cap = StrokeCap.Round)
+                    }
+                    points.forEach { drawCircle(color, radius = 7f, center = it) }
                 }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(stringResource(R.string.dose_elapsed), style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.minutes_elapsed, maximum.toInt()), style = MaterialTheme.typography.labelMedium)
             }
         }
     }
 }
 
-private fun timelineIcon(type: TimelineEventType) = when (type) {
-    TimelineEventType.Dose -> Icons.Outlined.LocalPharmacy
-    TimelineEventType.Focus -> Icons.Outlined.Bolt
-    TimelineEventType.Meal -> Icons.Outlined.Restaurant
-    TimelineEventType.SideEffect -> Icons.Outlined.WarningAmber
-    TimelineEventType.Note -> Icons.AutoMirrored.Outlined.Notes
-}
-
-private fun curveToPath(
-    points: List<CurvePoint>,
-    width: Float,
-    height: Float,
-): Path {
-    val path = Path()
-    points.forEachIndexed { index, point ->
-        val x = width * point.x
-        val y = height * point.y
-        if (index == 0) {
-            path.moveTo(x, y)
-        } else {
-            path.lineTo(x, y)
+@Composable
+private fun TimelineRecord(entry: ActivityEntry) {
+    val context = LocalContext.current
+    val time = DateFormat.getTimeFormat(context).format(Date(entry.timestamp))
+    val title: String
+    val details: List<String>
+    when (entry) {
+        is ActivityEntry.DoseTaken -> {
+            title = "Dose — $time"
+            details = listOf(
+                entry.dose.medicationName,
+                "${entry.dose.doseMg} mg • ${entry.dose.releaseType}",
+            )
+        }
+        is ActivityEntry.CheckInEntry -> {
+            title = "Check-in — $time"
+            details = buildList {
+                add("Focus ${entry.log.focusLevel} • Mood ${entry.log.moodLevel} • Energy ${entry.log.energyLevel}")
+                if (entry.log.tags.isNotBlank()) add("Tags: ${entry.log.tags}")
+                if (entry.log.notes.isNotBlank()) add("Notes: ${entry.log.notes}")
+            }
+        }
+        is ActivityEntry.SideEffectEntry -> {
+            title = "Side effect — $time"
+            details = listOf(entry.log.effectName)
         }
     }
-    return path
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            details.forEach { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    }
 }

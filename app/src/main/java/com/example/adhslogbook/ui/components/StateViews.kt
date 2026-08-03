@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Inbox
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,7 +22,6 @@ import com.example.adhslogbook.ui.theme.FocusLogTheme
 @Composable
 fun <T> ScreenStateHost(
     state: ScreenContentState<T>,
-    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     loadingMessage: String = "Loading screen",
     emptyMessage: String = "Nothing to show yet.",
@@ -34,7 +32,6 @@ fun <T> ScreenStateHost(
         ScreenContentState.Empty -> EmptyState(message = emptyMessage, modifier = modifier)
         is ScreenContentState.Error -> ErrorState(
             message = state.message,
-            onRetry = onRetry,
             modifier = modifier,
         )
         is ScreenContentState.Data -> {
@@ -96,7 +93,6 @@ private fun EmptyState(
 @Composable
 private fun ErrorState(
     message: String,
-    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -118,9 +114,6 @@ private fun ErrorState(
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
             )
-            Button(onClick = onRetry) {
-                Text("Retry")
-            }
         }
     }
 }

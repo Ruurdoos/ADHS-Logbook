@@ -21,9 +21,7 @@ object DatabaseModule {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "adhs_logbook_database"
-            )
-            .fallbackToDestructiveMigration()
-            .build()
+            ).build()
             INSTANCE = instance
             instance
         }

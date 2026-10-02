@@ -1,6 +1,58 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct SettingsView: View {
+    @EnvironmentObject var store: LogbookStore
+    var edit: (Med)->Void
+    @State var reminder: ReminderValue?
+    @State var removing: Med?
+    var body: some View {
+        Form {
+            Section(l("Medications")) {
+                ForEach(store.state.document.medications.filter(\.active)) { med in
+                    HStack {
+                        Button { edit(med) } label: { VStack(alignment: .leading) { Text(med.name);Text(l("Usual dose · %s %s",number(med.usualDose),l(med.unit))).font(.caption) } }
+                        Spacer();Button { removing = med } label: { Image(systemName: "minus.circle") }.accessibilityLabel(l("Remove %s",med.name))
+                    }
+                }
+                Button(l("＋ Add medication")) { edit(blankMedication()) }
+            }
+            Section(l("Reminders")) {
+                Toggle(l("Reminders"), isOn: Binding(get: { store.state.remindersEnabled }, set: store.enableReminders))
+                Text(l("A gentle reminder to log. Delivery may be delayed by battery settings.")).font(.footnote)
+                ForEach(store.state.document.reminders) { item in
+                    HStack {
+                        Button { reminder = item } label: { Text(Calendar.current.date(bySettingHour: item.hour, minute: item.minute, second: 0, of: Date())!, format: .dateTime.hour().minute()) }
+                        Spacer();Button { store.attempt { try store.change { $0.document.reminders.removeAll { $0.id == item.id } };store.schedule() } } label: { Image(systemName: "minus.circle") }.accessibilityLabel(l("Remove reminder"))
+                    }
+                }
+                Button(l("＋ Add time")) { reminder = ReminderValue(id: 0,hour: 8,minute: 0) }
+                if store.state.remindersEnabled, let date = store.scheduledThrough { Text(l("Scheduled through %s. Open the app regularly to refresh reminders.",date.formatted(date: .abbreviated,time: .shortened))).font(.footnote) }
+                Button(l("Open notification settings")) { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
+            }
+            Section(l("Optional features")) {
+                Toggle(l("Optional observations"),isOn: Binding(get: { store.state.document.preferences["observations_enabled"] == "true" },set: { enabled in store.attempt { try store.change { $0.document.preferences["observations_enabled"] = String(enabled) } } }))
+                Toggle(l("Measurements"),isOn: Binding(get: { store.state.document.preferences["measurements_enabled"] == "true" },set: { enabled in store.attempt { try store.change { $0.document.preferences["measurements_enabled"] = String(enabled) } } }))
+                Text(l("Available in observations. Disabling keeps saved records."))
+                Toggle(l("Weekly overview"),isOn: Binding(get: { store.state.document.preferences["weekly_enabled"] == "true" },set: { enabled in store.attempt { try store.change { $0.document.preferences["weekly_enabled"] = String(enabled) } } }))
+                NavigationLink(l("Quick access")) { QuickAccessView() }
+                NavigationLink(l("Pause reminders")) { PauseForm() }
+                NavigationLink(l("Supply")) { SupplyForm() }
+                NavigationLink(l("Home-screen widget")) { WidgetSettings() }
+            }
+            Section(l("Data & privacy")) {
+                PrivacySettings()
+                Text(l("Your log stays on this device. No account needed."))
+                Text(l("Cloud backups are disabled. Uninstalling removes your log. Create a backup to restore it later.")).font(.footnote)
+                NavigationLink(l("Create backup")+" / "+l("Restore backup")) { BackupView() }
+            }
+        }.navigationTitle(l("Settings"))
+            .sheet(item: $reminder) { ReminderForm(value: $0) }
+            .confirmationDialog(l("Remove medication?"), isPresented: Binding(get: { removing != nil },set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
+                Button(l("Remove"),role: .destructive) { if var med = removing { med.active = false;store.attempt { try store.save(med) } };removing = nil }
+            } message: { Text(l("%s will no longer appear for new doses. Past entries remain in your history.",removing?.name ?? "")) }
+    }
+}
 struct ReminderForm: View {
     @EnvironmentObject var store: LogbookStore
     @Environment(\.dismiss) var dismiss

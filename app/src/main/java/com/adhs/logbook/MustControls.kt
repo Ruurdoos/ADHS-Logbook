@@ -17,6 +17,26 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
+fun ReminderOptions(reminder: Reminder, medications: List<Medication>,dismiss: () -> Unit,save: (Reminder) -> Unit) {
+    var selected by remember { mutableStateOf(reminder.medicationId) }
+    var follow by remember { mutableStateOf(reminder.followUp) }
+    var cutoff by remember { mutableIntStateOf(reminder.cutoffMinutes) }
+    AlertDialog(onDismissRequest=dismiss,title={ Text(tr("Reminder options")) },text={
+        Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text(tr("Choose a medication to enable log-now. Otherwise this reminder opens your log."))
+            FilterChip(selected=selected==null,onClick={ selected=null },label={ Text(tr("Generic reminder")) })
+            medications.filter { it.active }.forEach { med ->
+                FilterChip(selected=selected==med.id,onClick={ selected=med.id },label={ Text("${med.name} · ${doseText(med.usualDose)} ${tr(med.unit)}") })
+            }
+            Row { Checkbox(follow,{ follow=it });Text(tr("One follow-up after 30 minutes"),Modifier.padding(top=12.dp)) }
+            Text(tr("Stop this reminder after"))
+            listOf(60,120,240).forEach { minutes -> FilterChip(selected=cutoff==minutes,onClick={ cutoff=minutes },label={ Text(tr("%d minutes",minutes)) }) }
+            Text(tr("Snooze adds 10 minutes, up to the cutoff. Reminder text hides medication names."))
+        }
+    },confirmButton={ TextButton({ save(reminder.copy(medicationId=selected,followUp=follow,cutoffMinutes=cutoff)) }) { Text(tr("Save")) } },dismissButton={ TextButton(dismiss) { Text(tr("Cancel")) } })
+}
+
+@Composable
 fun BackupControls(vm: LogbookViewModel,busy: Boolean) {
     var dialog by remember { mutableStateOf<String?>(null) }
     // Passwords deliberately do not use saved instance state.

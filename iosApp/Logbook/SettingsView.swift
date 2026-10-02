@@ -1,6 +1,30 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct ReminderForm: View {
+    @EnvironmentObject var store: LogbookStore
+    @Environment(\.dismiss) var dismiss
+    @State var value: ReminderValue
+    @State var time = Date()
+    var body: some View {
+        NavigationStack {
+            Form {
+                DatePicker(l("Time"),selection: $time,displayedComponents: .hourAndMinute)
+                Picker(l("Medication"),selection: Binding(get: { value.medicationId ?? 0 },set: { value.medicationId = $0 == 0 ? nil : $0 })) {
+                    Text(l("Generic reminder")).tag(Int64(0));ForEach(store.state.document.medications.filter(\.active)) { Text($0.name).tag($0.id) }
+                }
+                Text(l("Choose a medication to enable log-now. Otherwise this reminder opens your log.")).font(.footnote)
+                Toggle(l("One follow-up after 30 minutes"),isOn: $value.followUp)
+                Picker(l("Stop this reminder after"),selection: $value.cutoffMinutes) { ForEach([60,120,240],id: \.self) { Text(l("%d minutes",$0)).tag($0) } }
+                Text(l("Snooze adds 10 minutes, up to the cutoff. Reminder text hides medication names.")).font(.footnote)
+            }.navigationTitle(l("Reminder options"))
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) {
+                    value.hour = Calendar.current.component(.hour,from: time);value.minute = Calendar.current.component(.minute,from: time)
+                    store.attempt { try store.saveReminder(value);dismiss() }
+                } } }
+        }.onAppear { time = Calendar.current.date(bySettingHour: value.hour,minute: value.minute,second: 0,of: Date())! }
+    }
+}
 struct BinaryDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.data] }
     var data: Data

@@ -112,7 +112,7 @@ struct BackupView: View {
             if working { ProgressView(l("Working…")) }
         }.navigationTitle(l("Data & privacy"))
             .fileExporter(isPresented: $exporting,document: exportData,contentType: .data,defaultFilename: "ADHS-logbook.adhsbak") { result in
-                switch result { case .success: store.attempt { try store.change { $0.lastBackup = Date() } };message = l("Backup created.")
+                switch result { case .success: store.attempt { try await store.change { $0.lastBackup = Date() } };message = l("Backup created.")
                 case .failure: message = l("Backup failed. The selected file may be incomplete; create a new backup.") };exportData = BinaryDocument(data: Data())
             }
             .fileImporter(isPresented: $importing,allowedContentTypes: [.data],allowsMultipleSelection: false) { result in
@@ -128,11 +128,11 @@ struct BackupView: View {
                 } catch { message = l("Cannot open backup. Check the passphrase and file. Your log was not changed.") };working = false }
             }
             .alert(l("Replace current log?"),isPresented: $showConfirm) {
-                Button(l("Replace log"),role: .destructive) { if let doc = preview { store.attempt { try store.restore(doc);message = l("Backup restored. Reminders are off.") } };preview = nil }
+                Button(l("Replace log"),role: .destructive) { if let doc = preview { store.attempt { try await store.restore(doc);message = l("Backup restored. Reminders are off.") } };preview = nil }
                 Button(l("Cancel"),role: .cancel) { preview = nil }
             } message: {
                 if let doc = preview {
-                    Text(l("Medications: %d · Entries: %d",doc.medications.count,doc.entries.count)+"\n"+backupRange(doc)+"\n"+l("This replaces the current log. A private pre-restore snapshot is kept on this device. Reminders stay off until you enable them."))
+                    Text(l("Medications: %d · Entries: %d",doc.medications.count,doc.entries.count)+"\n"+l("Observations: %d · Measurements: %d · Non-use: %d",doc.observations.count,doc.measurements.count,doc.nonUse.count)+"\n"+backupRange(doc)+"\n"+l("This replaces the current log. A private pre-restore snapshot is kept on this device. Reminders stay off until you enable them."))
                 }
             }
             .alert(message ?? "",isPresented: Binding(get: { message != nil },set: { if !$0 { message = nil } })) { Button(l("Close")) { message = nil } }

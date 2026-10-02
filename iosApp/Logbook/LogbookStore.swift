@@ -227,9 +227,13 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
             } catch { self.error = l("Could not save or load data. Please try again.") }
         }
     }
-    func restore(_ document: Document) throws {
-        let valid = try document.validated()
-        try change { s in s.recovery = s.document;s.document = valid;s.remindersEnabled = false;s.actions = [:];s.occurrences = [];s.supplyAlerts = [:];s.supplyNotificationsEnabled = false }
+    func restore(_ document: Document) async throws {
+        await ready()
+        let valid = try await Task.detached { try document.validated() }.value
+        let wasReadable = readable
+        if !wasReadable, FileManager.default.fileExists(atPath: location.path) { try FileManager.default.copyItem(at: location,to: location.deletingLastPathComponent().appendingPathComponent("unreadable-"+UUID().uuidString+".json")) }
+        readable = true
+        do { try await change { s in s.recovery = wasReadable ? s.document : nil;s.document = valid;s.remindersEnabled = false;s.actions = [:];s.occurrences = [];s.supplyAlerts = [:];s.supplyNotificationsEnabled = false } } catch { readable = wasReadable;throw error }
         center.removeAllPendingNotificationRequests();center.removeAllDeliveredNotifications();undoID = nil
         for key in ["quick.enabled","quick.configuration","quick.last"] { UserDefaults.standard.removeObject(forKey: key) };invalidateWidget()
     }

@@ -140,9 +140,17 @@ class Store(private val context: Context, private val name: String = "logbook.db
     }
     fun restore(doc: BackupDocument) {
         validateRestore(doc)
+        val recovery=try { BackupFormat.encode(backup()) } catch(error: Exception) {
+            // Preserve unreadable bytes before rebuilding; never silently discard a damaged log.
+            close()
+            val original=context.getDatabasePath(name)
+            val folder=java.io.File(context.noBackupFilesDir,"unreadable-"+java.util.UUID.randomUUID())
+            check(folder.mkdirs())
+            listOf(original,java.io.File(original.path+"-wal"),java.io.File(original.path+"-shm"),java.io.File(original.path+"-journal")).filter { it.exists() }.forEach { it.copyTo(java.io.File(folder,it.name)) }
+            check(context.deleteDatabase(name))
+            null
+        }
         transaction {
-            // Recovery snapshot is private database data, covered by the same OS backup exclusion.
-            val recovery=BackupFormat.encode(backup())
             listOf("entry","medication","reminder","occurrence","action","preference","observation","non_use","supply","stock","measurement").forEach { writableDatabase.delete(it,null,null) }
             doc.medications.forEach { m -> writableDatabase.insertOrThrow("medication",null,ContentValues().apply {
                 put("id",m.id);put("preset",m.preset.name);put("dose",m.usualDose);put("active",if(m.active) 1 else 0);put("details",json.encodeToString(m))
@@ -156,7 +164,7 @@ class Store(private val context: Context, private val name: String = "logbook.db
             }) }
             writeShould(SupplyLedger.reconcile(doc))
             doc.preferences.forEach { (k,v) -> setPref(k,v) }
-            setPref("supply_enabled","false");setPref("reminders","false");setPref("recovery",recovery)
+            setPref("supply_enabled","false");setPref("reminders","false");if(recovery!=null) setPref("recovery",recovery)
         }
     }
 

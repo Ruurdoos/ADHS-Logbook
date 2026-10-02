@@ -95,11 +95,25 @@ class LogbookViewModel(application: Application) : AndroidViewModel(application)
     fun supply(value: Supply,count: Double,action: String,after: ()->Unit) = perform(after) { store.saveSupply(value,count,action) }
     fun restock(id: Long,units: Double,action: String,after: ()->Unit) = perform(after) { store.restock(id,units,action) }
     fun removeSupply(id: Long,after: ()->Unit) = perform(after) { store.removeSupply(id) }
+    val backupWorking=MutableStateFlow(false)
+    val backupPreview=MutableStateFlow<BackupDocument?>(null)
+    val backupMessage=MutableStateFlow<String?>(null)
+    fun backupJob(uri: Uri,password: CharArray,create: Boolean) {
+        if(backupWorking.value) { password.fill('\u0000');return }
+        backupWorking.value=true
+        viewModelScope.launch {
+            try { writes.withLock { if(create) { createBackup(uri,password);backupMessage.value=tr("Backup created.") } else backupPreview.value=previewBackup(uri,password) } }
+            catch(e: CancellationException) { throw e }
+            catch(e: Exception) { backupMessage.value=tr(if(create) "Backup failed. The selected file may be incomplete; create a new backup." else "Cannot open backup. Check the passphrase and file. Your log was not changed.") }
+            finally { password.fill('\u0000');backupWorking.value=false }
+        }
+    }
     suspend fun createBackup(uri: Uri, password: CharArray) = withContext(Dispatchers.IO) {
         try {
             val bytes=BackupCrypto.encrypt(store.backup(),password)
             getApplication<Application>().contentResolver.openOutputStream(uri,"wt")!!.use { it.write(bytes) }
             store.setPref("last_backup",ZonedDateTime.now().toString())
+            _state.value=store.snapshot()
         } finally { password.fill('\u0000') }
     }
     suspend fun previewBackup(uri: Uri,password: CharArray): BackupDocument = withContext(Dispatchers.IO) {
@@ -113,7 +127,7 @@ class LogbookViewModel(application: Application) : AndroidViewModel(application)
     }
     fun restore(doc: BackupDocument, after: () -> Unit) = perform(after) {
         store.validateRestore(doc)
-        val previous=store.occurrences()
+        val previous=runCatching { store.occurrences() }.getOrDefault(emptyList())
         store.restore(doc);QuickAccess.reset(getApplication())
         previous.forEach { ReminderScheduler.cancelOccurrence(getApplication(),it.id) };LogWidget.invalidate(getApplication());SupplyAlerts.cancelAll(getApplication())
     }

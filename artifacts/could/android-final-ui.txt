@@ -1,0 +1,8 @@
+
+com.adhs.logbook.LoggingFlowTest:.
+
+Time: 9.022
+
+OK (1 test)
+
+

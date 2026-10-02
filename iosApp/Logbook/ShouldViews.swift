@@ -139,3 +139,20 @@ struct SupplyForm: View {
             .confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try store.removeSupply(medId) } } }
     }
 }
+struct WidgetSettings: View {
+    @EnvironmentObject var store: LogbookStore
+    @State var medId: Int64 = 0
+    @State var generic = true
+    @State var saved = false
+    var body: some View {
+        Form {
+            Picker(l("Medication"),selection: $medId) { Text(l("Choose medication")).tag(Int64(0));ForEach(store.state.document.medications.filter(\.active)) { Text($0.name).tag($0.id) } }
+            Toggle(l("Generic widget content"),isOn: $generic)
+            Text(l("App lock always hides widget details. Changed medication settings require review in the app."))
+            Button(l("Save widget configuration")) { if let med = store.state.document.medications.first(where: { $0.id == medId }) { store.attempt { try store.configureWidget(med,generic: generic);saved = true } } }.disabled(medId == 0 || WidgetFiles.directory == nil)
+            if WidgetFiles.directory == nil { Text(l("Widget sharing is unavailable in this build.")) }
+            if saved { Text(l("Widget configured. Add it from your home screen's widget gallery if needed.")) }
+        }.navigationTitle(l("Home-screen widget"))
+            .onAppear { medId = Int64(UserDefaults.standard.integer(forKey: "widget.med"));generic = UserDefaults.standard.object(forKey: "widget.generic") == nil || UserDefaults.standard.bool(forKey: "widget.generic") }
+    }
+}

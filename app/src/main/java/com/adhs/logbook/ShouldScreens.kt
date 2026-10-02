@@ -133,3 +133,20 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
         if(existing!=null) DeleteRecord { vm.removeSupply(med.id,close) }
     }
 }
+@Composable private fun WidgetSetup(state: LogbookState) {
+    val context=LocalContext.current;val prefs=context.getSharedPreferences("widget",android.content.Context.MODE_PRIVATE)
+    var medId by rememberSaveable { mutableStateOf(prefs.getLong("med",0).toString()) }
+    var private by rememberSaveable { mutableStateOf(prefs.getBoolean("private",true)) }
+    var message by remember { mutableStateOf<String?>(null) }
+    Text(tr("Home-screen widget"),style=MaterialTheme.typography.headlineSmall)
+    Choice("Medication",state.medications.filter { it.active }.map { it.id.toString() to it.name },medId) { medId=it }
+    Row { Checkbox(private,{ private=it });Text(tr("Generic widget content")) }
+    Text(tr("App lock always hides widget details. Changed medication settings require review in the app."))
+    Button({ state.medications.find { it.id.toString()==medId }?.let { med ->
+        LogWidget.configure(context,med.id,med.revision,private)
+        val manager=AppWidgetManager.getInstance(context)
+        if(manager.isRequestPinAppWidgetSupported) manager.requestPinAppWidget(ComponentName(context,LogWidgetReceiver::class.java),null,null)
+        message=tr("Widget configured. Add it from your home screen's widget gallery if needed.")
+    } },enabled=state.medications.any { it.id.toString()==medId && it.active }) { Text(tr("Save widget configuration")) }
+    message?.let { Text(it) }
+}

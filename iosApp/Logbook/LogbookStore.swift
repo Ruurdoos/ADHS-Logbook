@@ -75,7 +75,7 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
             }
         }
         if let occurrence, state.occurrences.contains(where: { $0.id == occurrence && $0.state == "logged" }) { clear(occurrence) }
-        undoID = value.id; schedule();return value.id
+        undoID = entry.id == 0 ? value.id : nil; schedule();return value.id
     }
     func quick(_ med: Med, action: String = UUID().uuidString, occurrence: String? = nil) throws {
         let now = Date()

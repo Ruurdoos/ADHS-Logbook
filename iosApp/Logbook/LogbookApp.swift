@@ -37,27 +37,31 @@ struct RootView: View {
     func newEntry(_ med: Med) -> Entry {
         Entry(id: 0, medicationId: med.id, preset: med.preset, doseMg: med.usualDose, timestamp: millis(), zoneId: TimeZone.current.identifier, offset: zoneOffset(Date()), notes: "", medicationName: med.name, formulation: med.formulation, strength: med.strength, unit: med.unit, modelId: med.modelId)
     }
+    @State private var restoring = false
+    @State private var measurement: MeasurementValue?
     func loggingActions(_ med: Med) -> some View {
         VStack {
             Button { linkedOccurrence = nil;entryEditor = newEntry(med) } label: {
                 Text(l("Log dose")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity)
             }.buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground)).controlSize(.large)
             Button(l("Log now · %s %s", number(med.usualDose), l(med.unit))) {
-                store.attempt { try store.quick(med) }
+                guard !store.busy else { return };store.attempt { try await store.quick(med) }
             }.frame(minHeight: 44)
             if let id = store.undoID {
-                Button(l("Dose logged")+" · "+l("Undo")) { store.attempt { try store.delete(id) } }.frame(minHeight: 44)
+                Button(l("Dose logged")+" · "+l("Undo")) { store.attempt { try await store.delete(id) } }.frame(minHeight: 44)
             }
         }.frame(maxWidth: .infinity).padding().background(.regularMaterial)
     }
     var body: some View {
         Group {
-            if store.state.document.preferences["onboarded"] != "true" {
+            if store.loading { ProgressView(l("Working…")) } else if !store.readable { VStack(spacing: 20) { Text(l("Your log could not be opened. Restore a backup to recover your records."));Button(l("Restore backup")) { restoring = true } } } else if store.state.document.preferences["onboarded"] != "true" {
                 ScrollView { VStack(alignment: .leading, spacing: 24) {
                     Text(l("A little clarity,\nevery day.")).font(.largeTitle.bold())
-                    Text(l("Log your medication. Keep notes when you want to."))
+                    Text(l("Record observations and measurements, with or without medication."))
                     Spacer();Text(l("Private. Stored on this device.")).font(.footnote)
                     Button { medEditor = blankMedication() } label: { Text(l("Get started")).fixedSize(horizontal: false,vertical: true) }.buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground)).controlSize(.large)
+                    Button(l("Start without medication")) { store.attempt { try await store.change { $0.document.preferences["onboarded"] = "true";$0.document.preferences["observations_enabled"] = "true";$0.document.preferences["measurements_enabled"] = "true" } } }
+                    Button(l("Restore backup")) { restoring = true }
                 }.padding(24) }
             } else {
                 TabView(selection: $tab) {
@@ -65,6 +69,7 @@ struct RootView: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 24) {
                                 if store.state.document.preferences["observations_enabled"] == "true" { Button(l("Add observation")) { observation = blankObservation() } }
+                                if active.isEmpty || store.state.document.preferences["measurements_enabled"] == "true" { Button(l("Add measurement")) { measurement = blankMeasurement() } }
                                 if let med = medication, let supply = store.state.document.supplies.first(where: { $0.medicationId == med.id }), let balance = try? store.state.document.balance(med.id), balance.inconsistent || balance.remaining <= supply.lowThreshold || (supply.prescriptionDate ?? Int64.max) <= millis() {
                                     NavigationLink(l("Estimated remaining: %s %s",number(balance.remaining),supply.unitLabel)) { SupplyForm() }
                                 }
@@ -98,6 +103,9 @@ struct RootView: View {
                 }
             }
         }
+        .disabled(store.busy)
+        .sheet(isPresented: $restoring) { NavigationStack { BackupView().toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Close")) { restoring = false } } } } }
+        .sheet(item: $measurement) { MeasurementForm(original: $0) }
         .sheet(item: $observation) { ObservationForm(value: $0) }
         .sheet(item: $medEditor) { MedicationForm(value: $0) }
         .sheet(item: $entryEditor) { EntryForm(value: $0, occurrence: linkedOccurrence) }

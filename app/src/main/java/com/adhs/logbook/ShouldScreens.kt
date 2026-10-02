@@ -5,12 +5,16 @@ import android.app.TimePickerDialog
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.adhs.logbook.shared.*
@@ -33,26 +37,31 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
         DropdownMenu(expanded,{ expanded=false }) { items.forEach { (id,title) -> DropdownMenuItem(text={ Text(tr(title)) },onClick={ onChange(id);expanded=false }) } }
     }
 }
-@Composable fun ShouldScreen(mode: String,state: LogbookState,vm: LogbookViewModel,close: ()->Unit,navigate: (String)->Unit) {
+@Composable fun ShouldScreen(mode: String,state: LogbookState,vm: LogbookViewModel,close: ()->Unit,navigate: (String)->Unit,back: ()->Unit = close) {
     val busy by vm.busy.collectAsState()
+    if(mode=="records") {
+        val rows=remember(state.measurements,state.observations,state.nonUse,state.medications) {
+            (state.measurements.map { Triple(it.timestamp,"measurement:${it.id}",measurementText(it)) }+
+            state.observations.map { Triple(it.timestamp,"observation:${it.id}",tr(categoryName(it.category))+" · "+tr(responseName(it.response))) }+
+            state.nonUse.map { Triple(it.start,"nonuse:${it.id}",tr(nonUseName(it.kind))+" · "+(state.medications.find { m->m.id==it.medicationId }?.name ?: "")) }).sortedByDescending { it.first }
+        }
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal=24.dp),contentPadding=PaddingValues(vertical=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            item { TextButton(back) { Text(tr("Back")) };Text(tr("Observations & non-use"),style=MaterialTheme.typography.headlineSmall) }
+            item { Button({ navigate("observation:") }) { Text(tr("Add observation")) } }
+            if(vm.enabled("measurements_enabled")) item { Button({ navigate("measurement:") }) { Text(tr("Add measurement")) } }
+            item { Button({ navigate("nonuse:") }) { Text(tr("Record not taken")) } }
+            if(rows.isEmpty()) item { Text(tr("No records yet. Unrecorded days remain unknown.")) }
+            items(rows,key={ it.second }) { (time,target,label) -> OutlinedButton({ navigate(target) },Modifier.fillMaxWidth()) { Text(label+"\n"+Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT))) } }
+        }
+        return
+    }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        TextButton(close) { Text(tr("Back")) }
+        TextButton(back) { Text(tr("Back")) }
         when {
             mode=="quick" -> QuickAccessSettings(state)
             mode=="weekly" -> WeeklyView(vm.document())
             mode.startsWith("measurement:") -> MeasurementEditor(state.measurements.find { it.id==mode.substringAfter(':') },busy,{ vm.measurement(it,close) },{ vm.deleteMeasurement(it,close) })
-            mode=="records" -> {
-                Text(tr("Observations & non-use"),style=MaterialTheme.typography.headlineSmall)
-                Button({ navigate("observation:") }) { Text(tr("Add observation")) }
-                if(vm.enabled("measurements_enabled")) Button({ navigate("measurement:") }) { Text(tr("Add measurement")) }
-                Button({ navigate("nonuse:") }) { Text(tr("Record not taken")) }
-                val rows=state.measurements.map { Triple(it.timestamp,"measurement:${it.id}",measurementText(it)) }+state.observations.map { Triple(it.timestamp,"observation:${it.id}",tr(categoryName(it.category))+" · "+tr(responseName(it.response))) }+
-                    state.nonUse.map { Triple(it.start,"nonuse:${it.id}",tr("Not taken")+" · "+(state.medications.find { m->m.id==it.medicationId }?.name ?: "")) }
-                if(rows.isEmpty()) Text(tr("No records yet. Unrecorded days remain unknown."))
-                rows.sortedByDescending { it.first }.forEach { (time,target,label) ->
-                    OutlinedButton({ navigate(target) },Modifier.fillMaxWidth()) { Text(label+"\n"+Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT))) }
-                }
-            }
             mode.startsWith("observation:") -> { if(vm.enabled("measurements_enabled")) TextButton({ navigate("measurement:") }) { Text(tr("Add measurement")) };ObservationEditor(state.observations.find { it.id==mode.substringAfter(':') },state,busy,{ vm.observation(it,close) },{ vm.deleteObservation(it,close) }) }
             mode.startsWith("nonuse-occ:") -> {
                 val id=mode.split(':')[1];val selectedMed=mode.substringAfterLast(':').toLongOrNull();val o=vm.occurrence(id);val r=state.reminders.find { it.id==o?.reminderId }

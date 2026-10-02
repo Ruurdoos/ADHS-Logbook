@@ -48,6 +48,11 @@ class LogbookViewModel(application: Application) : AndroidViewModel(application)
             } finally { if(acquired) writes.unlock();pending--;_busy.value = pending>0 }
         }
     }
+    fun startWithoutMedication() = perform {
+        store.setPref("onboarded","true");store.setPref("observations_enabled","true");store.setPref("measurements_enabled","true")
+    }
+
+
     fun medication(id: Long?, preset: Preset, dose: Double, after: () -> Unit) = perform(after) { store.saveMedication(id,preset,dose) }
     fun medication(medication: Medication, after: () -> Unit) = perform(after) { store.saveMedication(medication);QuickAccess.reconcile(getApplication()); ReminderScheduler.reconcile(getApplication(),store) }
     fun removeMedication(id: Long) = perform { store.removeMedication(id);QuickAccess.reconcile(getApplication()); ReminderScheduler.reconcile(getApplication(),store) }

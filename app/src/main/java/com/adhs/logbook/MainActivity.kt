@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -110,6 +111,12 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
     val state by vm.state.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     var shouldPage by rememberSaveable { mutableStateOf<String?>(null) }
+    var parentPages by rememberSaveable { mutableStateOf(listOf<String>()) }
+    val pageState=rememberSaveableStateHolder()
+    fun closePage() {
+        shouldPage?.let { pageState.removeState(it) }
+        shouldPage=parentPages.lastOrNull();parentPages=parentPages.dropLast(1)
+    }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var welcome by rememberSaveable { mutableStateOf(true) }
     var editingMedication by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -164,6 +171,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
     LaunchedEffect(state.loaded) {
         if(state.loaded) withContext(Dispatchers.IO) { ReminderScheduler.reschedule(context,state) }
     }
+    LaunchedEffect(editingEntry) { if(editingEntry==null) pageState.removeState("dose-draft") }
     fun saved(id: Long) {
         editingEntry = null
         occurrenceId = null
@@ -171,8 +179,12 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
             if(snackbar.showSnackbar(tr("Dose logged"), tr("Undo"), duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) vm.delete(id)
         }
     }
+    var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    fun leaveEditor(action: ()->Unit) { discardAction=action }
+    fun leavePage() { if(shouldPage?.let { it.startsWith("observation:") || it.startsWith("measurement:") || it.startsWith("nonuse") || it=="pause" || it.startsWith("supply") }==true) leaveEditor { closePage() } else closePage() }
+    discardAction?.let { action -> AlertDialog(onDismissRequest={ discardAction=null },title={ Text(tr("Discard changes?")) },confirmButton={ TextButton({ discardAction=null;action() }) { Text(tr("Discard")) } },dismissButton={ TextButton({ discardAction=null }) { Text(tr("Keep editing")) } }) }
     BackHandler(shouldPage!=null || editingEntry != null || editingMedication != null || tab != 0) {
-        when { shouldPage!=null -> shouldPage=null;editingEntry != null -> editingEntry = null; editingMedication != null -> editingMedication = null; else -> tab = 0 }
+        when { shouldPage!=null -> leavePage();editingEntry != null -> leaveEditor { editingEntry = null }; editingMedication != null -> leaveEditor { editingMedication = null }; else -> tab = 0 }
     }
     Scaffold(
         containerColor = Paper,
@@ -193,25 +205,34 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).imePadding()) {
             when {
-                shouldPage!=null -> ShouldScreen(shouldPage!!,state,vm,{ if(shouldPage!!.startsWith("nonuse-occ:")) { editingEntry=null;occurrenceId=null };shouldPage=null },{ shouldPage=it })
-                !state.loaded -> Box(Modifier.fillMaxSize(),contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                !state.onboarded && welcome -> Welcome { welcome = false }
+                shouldPage=="backup" -> ScrollPage { TextButton({ closePage() }) { Text(tr("Back")) };BackupControls(vm,busy) }
+                shouldPage!=null -> pageState.SaveableStateProvider(shouldPage!!) {
+                    ShouldScreen(shouldPage!!,state,vm,{ if(shouldPage!!.startsWith("nonuse-occ:")) { editingEntry=null;occurrenceId=null };closePage() },{ parentPages=parentPages+shouldPage!!;shouldPage=it },back={ leavePage() })
+                }
+                !state.loaded -> Box(Modifier.fillMaxSize(),contentAlignment = Alignment.Center) {
+                    if(state.loadError==null) CircularProgressIndicator() else Column(Modifier.padding(24.dp)) {
+                        Text(state.loadError!!);Button({ vm.refresh() }) { Text(tr("Try again")) }
+                        TextButton({ shouldPage="backup" }) { Text(tr("Restore backup")) }
+                    }
+                }
+                !state.onboarded && welcome -> Welcome({ welcome=false },{ vm.startWithoutMedication() },{ shouldPage="backup" })
                 !state.onboarded || editingMedication != null -> MedicationEditor(
                     medication = state.medications.find { it.id == editingMedication }, busy = busy,
                     onboarding = !state.onboarded,
-                    onBack = { if(state.onboarded) editingMedication = null else welcome = true },
+                    onBack = { leaveEditor { if(state.onboarded) editingMedication = null else welcome = true } },
                     onSave = { med -> vm.medication(med) { editingMedication = null } },
                 )
-                editingEntry != null -> EntryEditor(
+                editingEntry != null -> pageState.SaveableStateProvider("dose-draft") { EntryEditor(
                     entry = state.entries.find { it.id == editingEntry }, medications = state.medications, supplies=state.supplies, onNonUse=occurrenceId?.let { id -> { med: Long -> shouldPage="nonuse-occ:$id:$med" } },
-                    selected = selected, busy = busy, onBack = { editingEntry = null; occurrenceId=null },
+                    selected = selected, busy = busy, onBack = { leaveEditor { editingEntry = null; occurrenceId=null } },
                     onSave = { entry, actionId -> vm.save(entry,actionId,occurrenceId) { id ->
                         if(entry.id == 0L) saved(id) else { editingEntry = null; scope.launch { snackbar.showSnackbar(tr("Changes saved")) } }
                     } },
                     onDelete = { id -> vm.delete(id) { editingEntry = null; scope.launch { snackbar.showSnackbar(tr("Entry deleted")) } } },
-                )
+                ) }
                 tab == 0 -> Column {
                     if(vm.observationsEnabled()) TextButton({ shouldPage="observation:" }) { Text(tr("Add observation")) }
+                    if(active.isEmpty() || vm.enabled("measurements_enabled")) TextButton({ shouldPage="measurement:" }) { Text(tr("Add measurement")) }
                     state.supplies.filter { it.medicationId==selected?.id }.forEach { supply ->
                         val balance=SupplyLedger.balance(vm.document(),supply)
                         if(balance.inconsistent || balance.remaining<=supply.lowThreshold || (supply.prescriptionDate?.let { it<=System.currentTimeMillis() }==true)) TextButton({ shouldPage="supply" }) { Text(tr("Estimated remaining: %s %s",doseText(balance.remaining),supply.unitLabel)) }
@@ -259,7 +280,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min=availableHeight).padding(24.dp),verticalArrangement=Arrangement.spacedBy(20.dp),content=content)
     }
 }
-@Composable private fun Welcome(onStart: () -> Unit) {
+@Composable private fun Welcome(onStart: () -> Unit,onSkip: ()->Unit,onRestore: ()->Unit) {
     ScrollPage {
         Spacer(Modifier.height(40.dp))
         Text(tr("ADHS LOGBOOK"),color=Sage,letterSpacing=2.sp,fontSize=12.sp,fontWeight=FontWeight.Bold)
@@ -268,6 +289,8 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         Spacer(Modifier.weight(1f))
         Note("Private. Stored on this device.")
         Primary("Get started",onClick=onStart)
+        TextButton(onSkip) { Text(tr("Start without medication")) }
+        TextButton(onRestore) { Text(tr("Restore backup")) }
     }
 }
 
@@ -334,7 +357,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
                 Surface(color=MaterialTheme.colorScheme.surface,shape=MaterialTheme.shapes.large) {
                     Column(Modifier.padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                         Text(tr("Your log starts here."),fontSize=22.sp)
-                        Note("Add a medication to start your log.")
+                        Note("Record observations and measurements, with or without medication.")
                         Primary("Add medication",onClick=onAdd)
                     }
                 }

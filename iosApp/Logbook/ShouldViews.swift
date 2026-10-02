@@ -1,5 +1,33 @@
 import SwiftUI
 
+struct ObservationList: View {
+    @EnvironmentObject var store: LogbookStore
+    @State var editing: ObservationValue?
+    @State var measurement: MeasurementValue?
+    @State var nonUse: NonUseValue?
+    var body: some View {
+        List {
+            Button(l("Add observation")) { editing = blankObservation() }
+            if store.state.document.preferences["measurements_enabled"] == "true" { Button(l("Add measurement")) { measurement = blankMeasurement() } }
+            Button(l("Record not taken")) { nonUse = blankNonUse() }
+            if store.state.document.observations.isEmpty && store.state.document.nonUse.isEmpty && store.state.document.measurements.isEmpty { Text(l("No records yet. Unrecorded days remain unknown.")) }
+            if store.state.document.preferences["measurements_enabled"] == "true" || !store.state.document.measurements.isEmpty { Section(l("Measurements")) { ForEach(store.state.document.measurements.sorted { $0.timestamp > $1.timestamp }) { m in Button { measurement = m } label: { VStack(alignment: .leading) { Text(measurementText(m));Text(date(m.timestamp).formatted(date: .abbreviated,time: .shortened)) } } } } }
+            Section(l("Observations")) {
+                ForEach(store.state.document.observations.sorted { $0.timestamp > $1.timestamp }) { record in
+                    Button { editing = record } label: { VStack(alignment: .leading) { Text(l(categoryName(record.category)));Text(date(record.timestamp),format: .dateTime.day().month().year().hour().minute()).font(.caption) } }
+                }
+            }
+            Section(l("Not taken")) {
+                ForEach(store.state.document.nonUse.sorted { $0.start > $1.start }) { record in
+                    Button { nonUse = record } label: { VStack(alignment: .leading) { Text(store.state.document.medications.first { $0.id == record.medicationId }?.name ?? "");Text(date(record.start),format: .dateTime.day().month().year().hour().minute()).font(.caption) } }
+                }
+            }
+        }.navigationTitle(l("Observations"))
+            .sheet(item: $editing) { ObservationForm(value: $0) }
+            .sheet(item: $measurement) { MeasurementForm(original: $0) }
+            .sheet(item: $nonUse) { NonUseForm(value: $0) }
+    }
+}
 func blankObservation() -> ObservationValue { ObservationValue(category: "focus",response: "",timestamp: millis(),createdAt: millis(),zoneId: TimeZone.current.identifier,offset: zoneOffset(Date())) }
 func blankNonUse() -> NonUseValue { let now = millis();return NonUseValue(medicationId: 0,start: now,end: now,createdAt: now,zoneId: TimeZone.current.identifier,offset: zoneOffset(date(now))) }
 struct ObservationForm: View {

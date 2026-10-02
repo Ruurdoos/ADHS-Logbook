@@ -33,6 +33,42 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
         DropdownMenu(expanded,{ expanded=false }) { items.forEach { (id,title) -> DropdownMenuItem(text={ Text(tr(title)) },onClick={ onChange(id);expanded=false }) } }
     }
 }
+@Composable fun ShouldScreen(mode: String,state: LogbookState,vm: LogbookViewModel,close: ()->Unit,navigate: (String)->Unit) {
+    val busy by vm.busy.collectAsState()
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+        TextButton(close) { Text(tr("Back")) }
+        when {
+            mode=="quick" -> QuickAccessSettings(state)
+            mode=="weekly" -> WeeklyView(vm.document())
+            mode.startsWith("measurement:") -> MeasurementEditor(state.measurements.find { it.id==mode.substringAfter(':') },busy,{ vm.measurement(it,close) },{ vm.deleteMeasurement(it,close) })
+            mode=="records" -> {
+                Text(tr("Observations & non-use"),style=MaterialTheme.typography.headlineSmall)
+                Button({ navigate("observation:") }) { Text(tr("Add observation")) }
+                if(vm.enabled("measurements_enabled")) Button({ navigate("measurement:") }) { Text(tr("Add measurement")) }
+                Button({ navigate("nonuse:") }) { Text(tr("Record not taken")) }
+                val rows=state.measurements.map { Triple(it.timestamp,"measurement:${it.id}",measurementText(it)) }+state.observations.map { Triple(it.timestamp,"observation:${it.id}",tr(categoryName(it.category))+" · "+tr(responseName(it.response))) }+
+                    state.nonUse.map { Triple(it.start,"nonuse:${it.id}",tr("Not taken")+" · "+(state.medications.find { m->m.id==it.medicationId }?.name ?: "")) }
+                if(rows.isEmpty()) Text(tr("No records yet. Unrecorded days remain unknown."))
+                rows.sortedByDescending { it.first }.forEach { (time,target,label) ->
+                    OutlinedButton({ navigate(target) },Modifier.fillMaxWidth()) { Text(label+"\n"+Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT))) }
+                }
+            }
+            mode.startsWith("observation:") -> { if(vm.enabled("measurements_enabled")) TextButton({ navigate("measurement:") }) { Text(tr("Add measurement")) };ObservationEditor(state.observations.find { it.id==mode.substringAfter(':') },state,busy,{ vm.observation(it,close) },{ vm.deleteObservation(it,close) }) }
+            mode.startsWith("nonuse-occ:") -> {
+                val id=mode.split(':')[1];val selectedMed=mode.substringAfterLast(':').toLongOrNull();val o=vm.occurrence(id);val r=state.reminders.find { it.id==o?.reminderId }
+                if(o!=null && r!=null && selectedMed!=null) {
+                    val time=Instant.ofEpochMilli(o.scheduled).atZone(ZoneId.systemDefault())
+                    val value=state.nonUse.find { it.occurrenceId==id } ?: NonUse(UUID.randomUUID().toString(),r.medicationId ?: selectedMed,o.scheduled,o.scheduled,System.currentTimeMillis(),time.zone.id,time.offset.id,occurrenceId=id)
+                    NonUseEditor(value,state,busy,{ vm.nonUse(it,close) },{ vm.deleteNonUse(it,close) })
+                } else Text(tr("Choose a medication."))
+            }
+            mode.startsWith("nonuse:") -> NonUseEditor(state.nonUse.find { it.id==mode.substringAfter(':') },state,busy,{ vm.nonUse(it,close) },{ vm.deleteNonUse(it,close) })
+            mode=="pause" -> PauseEditor(state.pause,busy) { vm.pause(it);close() }
+            mode=="supply" -> SupplyEditor(state,vm,busy,close)
+            mode=="widget" -> WidgetSetup(state)
+        }
+    }
+}
 @Composable private fun ObservationEditor(original: Observation?,state: LogbookState,busy: Boolean,save: (Observation)->Unit,delete: (String)->Unit) {
     var category by rememberSaveable { mutableStateOf(original?.category ?: "focus") }
     var response by rememberSaveable { mutableStateOf(original?.response ?: "") }

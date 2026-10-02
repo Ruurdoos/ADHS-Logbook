@@ -1,0 +1,14 @@
+<resources>
+    <string name="reminders">Reminders</string>
+    <string name="dose_logged">Dose logged</string>
+    <string name="reminder_title">A moment for your log</string>
+    <string name="reminder_expired">This reminder expired. Open your log to review.</string>
+    <string name="review_history">You can review or edit this entry in History.</string>
+    <string name="reminder_body">Add an entry when you are ready.</string>
+    <string name="log_now">Log now</string>
+    <string name="snooze">Snooze 10 min</string>
+    <string name="open">Open</string>
+    <string name="undo">Undo</string>
+    <string name="save_error">Could not save or load data. Please try again.</string>
+<string name="log_dose_shortcut">Log dose</string>
+</resources>

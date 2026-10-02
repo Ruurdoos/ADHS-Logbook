@@ -1,0 +1,1 @@
+<resources><style name="Theme.Logbook" parent="Theme.AppCompat.DayNight.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">true</item><item name="android:windowActionModeOverlay">true</item><item name="android:colorAccent">#416B59</item><item name="android:windowBackground">#F7F8F4</item></style></resources>

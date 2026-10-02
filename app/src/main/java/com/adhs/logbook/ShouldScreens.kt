@@ -58,8 +58,38 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     Button({ val zone=Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault());save(Observation(id,category,response,if(response=="rated") rating else null,time,original?.createdAt ?: System.currentTimeMillis(),if(original?.timestamp==time) original.zoneId else zone.zone.id,if(original?.timestamp==time) original.offset else zone.offset.id,sleepDate=if(category=="sleep") sleep else null,doseId=link.toLongOrNull(),notes=notes)) },enabled=!busy && valid) { Text(tr("Save")) }
     if(original!=null) DeleteRecord { delete(original.id) }
 }
+@Composable private fun NonUseEditor(original: NonUse?,state: LogbookState,busy: Boolean,save: (NonUse)->Unit,delete: (String)->Unit) {
+    var med by rememberSaveable { mutableStateOf(original?.medicationId?.toString() ?: "") }
+    var start by rememberSaveable { mutableLongStateOf(original?.start ?: System.currentTimeMillis()) }
+    var end by rememberSaveable { mutableLongStateOf(original?.end ?: start) }
+    var period by rememberSaveable { mutableStateOf(original!=null && original.end>original.start) }
+    var notes by rememberSaveable { mutableStateOf(original?.notes ?: "") }
+    val id=rememberSaveable { original?.id ?: UUID.randomUUID().toString() }
+    Text(tr("Record not taken"),style=MaterialTheme.typography.headlineSmall)
+    Text(tr("Only record what you know. Pausing reminders does not record non-use."))
+    Choice("Medication",state.medications.map { it.id.toString() to it.name },med) { med=it }
+    TimeField("Start",start) { start=it }
+    Row { Checkbox(period,{ period=it;end=start });Text(tr("Record a period")) }
+    if(period) TimeField("End",end) { end=it }
+    OutlinedTextField(notes,{ notes=it.take(5000) },label={ Text(tr("Notes (optional)")) })
+    val until=if(period) end else start
+    val overlap=state.entries.any { it.medicationId.toString()==med && it.timestamp in start..until }
+    if(overlap) Text(tr("A dose is recorded in this non-use period. Correct one record first."))
+    Button({ val zone=Instant.ofEpochMilli(start).atZone(ZoneId.systemDefault());save(NonUse(id,med.toLong(),start,until,original?.createdAt ?: System.currentTimeMillis(),if(original?.start==start) original.zoneId else zone.zone.id,if(original?.start==start) original.offset else zone.offset.id,notes,original?.occurrenceId)) },enabled=!busy && med.isNotBlank() && until>=start && until<=System.currentTimeMillis() && !overlap) { Text(tr("Save")) }
+    if(original!=null && state.nonUse.any { it.id==original.id }) DeleteRecord { delete(original.id) }
+}
 @Composable private fun DeleteRecord(remove: ()->Unit) {
     var confirm by remember { mutableStateOf(false) }
     TextButton({ confirm=true }) { Text(tr("Delete record")) }
     if(confirm) AlertDialog(onDismissRequest={ confirm=false },title={ Text(tr("Delete record?")) },text={ Text(tr("This cannot be undone.")) },confirmButton={ TextButton({ confirm=false;remove() }) { Text(tr("Delete")) } },dismissButton={ TextButton({ confirm=false }) { Text(tr("Cancel")) } })
+}
+@Composable private fun PauseEditor(original: ReminderPause,busy: Boolean,save: (ReminderPause)->Unit) {
+    var paused by rememberSaveable { mutableStateOf(original.active(System.currentTimeMillis())) }
+    var timed by rememberSaveable { mutableStateOf(original.until!=null) }
+    var until by rememberSaveable { mutableLongStateOf(original.until ?: System.currentTimeMillis()+86400000) }
+    Text(tr("Pause reminders"),style=MaterialTheme.typography.headlineSmall)
+    Row { Switch(paused,{ paused=it });Text(tr("Pause reminders")) }
+    Text(tr("This pauses notifications only. It does not record medication use or non-use."))
+    if(paused) { Row { Checkbox(timed,{ timed=it });Text(tr("Resume at a chosen time")) };if(timed) TimeField("Resume at",until) { until=it } }
+    Button({ save(ReminderPause(paused,if(paused && timed) until else null)) },enabled=!busy && (!paused || !timed || until>System.currentTimeMillis())) { Text(tr("Save")) }
 }

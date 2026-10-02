@@ -47,3 +47,50 @@ struct ObservationForm: View {
         }.sheet(item: $measurement) { MeasurementForm(original: $0) }.onAppear { time = date(value.timestamp);let f = DateFormatter();f.dateFormat = "yyyy-MM-dd";sleepDate = value.sleepDate ?? f.string(from: Calendar.current.date(byAdding: .day,value: -1,to: Date())!) }
     }
 }
+struct NonUseForm: View {
+    @EnvironmentObject var store: LogbookStore
+    @Environment(\.dismiss) var dismiss
+    @State var value: NonUseValue
+    @State var start = Date()
+    @State var end = Date()
+    @State var period = false
+    @State var deleting = false
+    var existing: Bool { store.state.document.nonUse.contains { $0.id == value.id } }
+    var overlaps: Bool { store.state.document.entries.contains { $0.medicationId == value.medicationId && $0.timestamp >= millis(start) && $0.timestamp <= millis(period ? end : start) } }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Text(l("Only record what you know. Pausing reminders does not record non-use."))
+                Picker(l("Medication"),selection: $value.medicationId) { Text(l("Choose medication")).tag(Int64(0));ForEach(store.state.document.medications) { Text($0.name).tag($0.id) } }
+                DatePicker(l("Start"),selection: $start,in: ...Date())
+                Toggle(l("Record a period"),isOn: $period)
+                if period { DatePicker(l("End"),selection: $end,in: ...Date()) }
+                TextField(l("Notes (optional)"),text: $value.notes,axis: .vertical).lineLimit(2...8)
+                if overlaps { Text(l("A dose is recorded in this non-use period. Correct one record first.")) }
+                if existing { Button(l("Delete record"),role: .destructive) { deleting = true } }
+            }.navigationTitle(l("Record not taken"))
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) { Button(l("Save")) {
+                        if value.start != millis(start) { value.zoneId = TimeZone.current.identifier;value.offset = zoneOffset(start) };value.start = millis(start);value.end = millis(period ? end : start)
+                        store.attempt { try store.saveNonUse(value);dismiss() }
+                    }.disabled(value.medicationId == 0 || overlaps || (period && end < start) || value.notes.count > 5000) }
+                }.confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try store.deleteNonUse(value.id);dismiss() } } }
+        }.onAppear { start = date(value.start);end = date(value.end);period = value.end > value.start }
+    }
+}
+struct PauseForm: View {
+    @EnvironmentObject var store: LogbookStore
+    @State var paused = false
+    @State var timed = false
+    @State var until = Date().addingTimeInterval(86400)
+    var body: some View {
+        Form {
+            Toggle(l("Pause reminders"),isOn: $paused)
+            Text(l("This pauses notifications only. It does not record medication use or non-use."))
+            if paused { Toggle(l("Resume at a chosen time"),isOn: $timed);if timed { DatePicker(l("Resume at"),selection: $until,in: Date()...) } }
+            Button(l("Save")) { store.attempt { try store.pause(PauseValue(paused: paused,until: paused && timed ? millis(until) : nil)) } }
+        }.navigationTitle(l("Pause reminders"))
+            .onAppear { paused = store.state.document.pause.active();timed = store.state.document.pause.until != nil;if let end = store.state.document.pause.until { until = date(end) } }
+    }
+}

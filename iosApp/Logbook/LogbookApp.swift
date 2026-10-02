@@ -5,7 +5,16 @@ import LogbookShared
 @main
 struct LogbookApp: App {
     @StateObject private var privacy = PrivacyController.shared
-    @StateObject private var store = LogbookStore()
+    @StateObject private var store = LogbookApp.makeStore()
+    private static func makeStore() -> LogbookStore {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "--ui-test-data"),args.indices.contains(i+1),UUID(uuidString: args[i+1]) != nil {
+            return LogbookStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("uitest-"+args[i+1]),notifications: false)
+        }
+        #endif
+        return LogbookStore()
+    }
     @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
         WindowGroup {

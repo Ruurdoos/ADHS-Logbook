@@ -543,13 +543,24 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
 
 @Composable private fun HistoryScreen(entries: List<DoseEntry>,onEdit: (Long) -> Unit) {
     var filter by rememberSaveable { mutableStateOf<String?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var medicationFilter by rememberSaveable { mutableStateOf<Long?>(null) }
+    var medicationMenu by remember { mutableStateOf(false) }
     val context=LocalContext.current
     val timeFormat=timeFormat(context)
     val zone=ZoneId.systemDefault()
-    val grouped=entries.filter { filter==null || Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate().toString()==filter }
+    val grouped=entries.filter { (filter==null || Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate().toString()==filter) && (medicationFilter==null || it.medicationId==medicationFilter) && (query.isBlank() || it.medicationName.contains(query,true) || it.notes.contains(query,true)) }
         .groupBy { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal=24.dp),contentPadding=PaddingValues(vertical=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         item { Title("History") }
+        item { OutlinedTextField(query,{ query=it },Modifier.fillMaxWidth(),label={ Text(tr("Search medications and notes")) }) }
+        item { Box {
+            OutlinedButton({ medicationMenu=true }) { Text(entries.firstOrNull { it.medicationId==medicationFilter }?.medicationName ?: tr("All medications")) }
+            DropdownMenu(medicationMenu,{ medicationMenu=false }) {
+                DropdownMenuItem(text={ Text(tr("All medications")) },onClick={ medicationFilter=null;medicationMenu=false })
+                entries.distinctBy { it.medicationId }.forEach { e -> DropdownMenuItem(text={ Text(e.medicationName) },onClick={ medicationFilter=e.medicationId;medicationMenu=false }) }
+            }
+        } }
         item { Row(verticalAlignment=Alignment.CenterVertically) {
             OutlinedButton({ pickDate(context,filter?.let(LocalDate::parse) ?: LocalDate.now()) { filter=it.toString() } }) { Icon(Icons.Outlined.CalendarToday,null); Spacer(Modifier.width(8.dp)); Text(filter ?: tr("Choose day")) }
             if(filter!=null) TextButton({ filter=null }) { Text(tr("Show all")) }
@@ -637,6 +648,7 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
     val timeFormat=timeFormat(context)
     var configureReminder by remember { mutableStateOf<Reminder?>(null) }
     var remove by remember { mutableStateOf<Medication?>(null) }
+    var archived by rememberSaveable { mutableStateOf(false) }
     var denied by remember { mutableStateOf(!NotificationManagerCompat.from(context).areNotificationsEnabled()) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -654,6 +666,13 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
                 IconButton({ onMedication(med.id) },enabled=!busy) { Icon(Icons.Outlined.Edit,tr("Edit %s",med.name)) }
                 IconButton({ remove=med },enabled=!busy) { Icon(Icons.Outlined.Close,tr("Remove %s",med.name)) }
             }
+        }
+        item { TextButton({ archived=!archived }) { Text(tr("Archived medications")) } }
+        if(archived) {
+            if(state.medications.none { !it.active }) item { Text(tr("No archived medications.")) }
+            items(state.medications.filter { !it.active },key={ "archived-${it.id}" }) { med -> Row {
+                Text(med.name,Modifier.weight(1f));TextButton({ vm.medication(med.copy(active=true)) {} },enabled=!busy) { Text(tr("Reactivate")) }
+            } }
         }
         item { TextButton({ onMedication(-1) },enabled=!busy) { Text(tr("＋ Add medication")) }; HorizontalDivider() }
         item {

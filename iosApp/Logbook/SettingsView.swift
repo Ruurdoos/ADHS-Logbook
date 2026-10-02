@@ -17,8 +17,14 @@ struct SettingsView: View {
                 }
                 Button(l("＋ Add medication")) { edit(blankMedication()) }
             }
+            Section(l("Archived medications")) {
+                ForEach(store.state.document.medications.filter { !$0.active }) { med in Button(l("Reactivate")+" · "+med.name) { var active = med;active.active = true;store.attempt { try await store.save(active) } } }
+            }
             Section(l("Reminders")) {
                 Toggle(l("Reminders"), isOn: Binding(get: { store.state.remindersEnabled }, set: store.enableReminders))
+                if store.state.remindersEnabled && store.notificationsAllowed == false { Text(l("Notifications are turned off. Your reminder times are saved.")) }
+                if store.state.remindersEnabled && store.state.document.reminders.isEmpty { Text(l("No reminder times. Add a time to receive reminders.")) }
+                if store.state.document.pause.active() { Text(l("Reminders are paused.")) }
                 Text(l("A gentle reminder to log. Delivery may be delayed by battery settings.")).font(.footnote)
                 ForEach(store.state.document.reminders) { item in
                     HStack {

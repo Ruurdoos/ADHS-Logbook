@@ -252,11 +252,15 @@ struct HistoryView: View {
     var edit: (Entry) -> Void
     @State var filter = false
     @State var day = Date()
-    var entries: [Entry] { store.state.document.entries.filter { !filter || Calendar.current.isDate(date($0.timestamp),inSameDayAs: day) } }
+    @State var query = ""
+    @State var medicationFilter: Int64 = 0
+    var entries: [Entry] { store.state.document.entries.filter { (!filter || Calendar.current.isDate(date($0.timestamp),inSameDayAs: day)) && (medicationFilter == 0 || $0.medicationId == medicationFilter) && (query.isEmpty || $0.medicationName.localizedCaseInsensitiveContains(query) || $0.notes.localizedCaseInsensitiveContains(query)) } }
     var body: some View {
         List {
             if store.state.document.preferences["weekly_enabled"] == "true" { NavigationLink(l("Weekly overview")) { WeeklyView() } }
             NavigationLink(l("Observations & non-use")) { ObservationList() }
+            TextField(l("Search medications and notes"),text: $query)
+            Picker(l("Medication"),selection: $medicationFilter) { Text(l("All medications")).tag(Int64(0));ForEach(store.state.document.medications) { Text($0.name).tag($0.id) } }
             Toggle(l("Choose day"), isOn: $filter)
             if filter { DatePicker(l("Choose day"), selection: $day, displayedComponents: .date) }
             if entries.isEmpty { Text(l("No doses logged for this day.")) }

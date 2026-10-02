@@ -12,13 +12,13 @@ import java.time.ZoneOffset
 
 // Database transactions are the cross-entry-point write boundary, not the ViewModel's busy flag.
 data class LogbookState(
-    val loaded: Boolean = false, val medications: List<Medication> = emptyList(),
+    val loaded: Boolean = false, val loadError: String? = null, val preferences: Map<String,String> = emptyMap(), val medications: List<Medication> = emptyList(),
     val entries: List<DoseEntry> = emptyList(), val reminders: List<Reminder> = emptyList(),
     val remindersEnabled: Boolean = false, val onboarded: Boolean = false,
     val observations: List<Observation> = emptyList(), val nonUse: List<NonUse> = emptyList(),
     val pause: ReminderPause = ReminderPause(), val supplies: List<Supply> = emptyList(), val stock: List<StockMovement> = emptyList(), val measurements: List<Measurement> = emptyList(),
 )
-class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(context, name, null, 4), LogRepository {
+class Store(private val context: Context, private val name: String = "logbook.db") : SQLiteOpenHelper(context, name, null, 4, android.database.DatabaseErrorHandler { throw android.database.sqlite.SQLiteDatabaseCorruptException("Unreadable log; preserve it for recovery") }), LogRepository {
     private val json = BackupFormat.json
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE medication(id INTEGER PRIMARY KEY AUTOINCREMENT, preset TEXT NOT NULL, dose REAL NOT NULL CHECK(dose>0), active INTEGER NOT NULL DEFAULT 1)")
@@ -60,9 +60,10 @@ class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(co
         val reminders = db.rawQuery("SELECT id,hour,minute,details FROM reminder ORDER BY hour,minute", null).use { c -> buildList {
             while(c.moveToNext()) add(if(c.getString(3).isNotEmpty()) json.decodeFromString<Reminder>(c.getString(3)) else Reminder(c.getInt(0),c.getInt(1),c.getInt(2)))
         } }
-        LogbookState(true,meds,entries,reminders,pref("reminders")=="true",pref("onboarded")=="true",readRows<Observation>("observation"),readRows<NonUse>("non_use"),
+        LogbookState(true,null,readPreferences(),meds,entries,reminders,pref("reminders")=="true",pref("onboarded")=="true",readRows<Observation>("observation"),readRows<NonUse>("non_use"),
             pref("pause")?.let { json.decodeFromString<ReminderPause>(it) } ?: ReminderPause(),readRows<Supply>("supply"),readRows<StockMovement>("stock"),readRows<Measurement>("measurement"))
     }
+    private fun readPreferences(): Map<String,String> = readableDatabase.rawQuery("SELECT key,value FROM preference",null).use { c -> buildMap { while(c.moveToNext()) put(c.getString(0),c.getString(1)) } }
     fun pref(key: String): String? = readableDatabase.rawQuery("SELECT value FROM preference WHERE key=?",arrayOf(key)).use { if(it.moveToFirst()) it.getString(0) else null }
     fun setPref(key: String, value: String) { check(writableDatabase.insertWithOnConflict("preference",null,ContentValues().apply { put("key",key);put("value",value) },SQLiteDatabase.CONFLICT_REPLACE)!=-1L) }
     fun saveMedication(id: Long?, preset: Preset, dose: Double) = saveMedication(Medication(id ?: 0,preset,dose))
@@ -84,7 +85,7 @@ class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(co
         require(entry.notes.length <= 5000 && entry.medicationName.isNotBlank() && entry.unit in doseUnits)
         ZoneId.of(entry.zoneId); ZoneOffset.of(entry.offset)
         require(snapshot().medications.any { it.id == entry.medicationId })
-        require(snapshot().nonUse.none { it.medicationId==entry.medicationId && entry.timestamp in it.start..it.end }) { "A non-use record overlaps this dose. Correct one record first." }
+        validateField(snapshot().nonUse.none { it.medicationId==entry.medicationId && it.contains(entry.timestamp) },"A non-use record overlaps this dose. Correct one record first.")
         val values=ContentValues().apply {
             put("medication_id",entry.medicationId);put("preset",entry.preset.name);put("dose",entry.doseMg);put("timestamp",entry.timestamp)
             put("zone",entry.zoneId);put("offset",entry.offset);if(entry.mood==null) putNull("mood") else put("mood",entry.mood);put("notes",entry.notes)

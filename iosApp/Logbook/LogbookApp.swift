@@ -86,7 +86,7 @@ struct RootView: View {
                                             }
                                         }
                                         if !store.state.document.entries.contains(where: { $0.medicationId == med.id && Calendar.current.isDateInToday(date($0.timestamp)) }) { Text(l("No dose logged today.")).foregroundStyle(.secondary) }
-                                        EstimateView(med: med, document: store.state.document)
+                                        EstimateView(med: med, document: store.state.document, revision: store.revision)
                                     }
                                 } else { Button(l("Add medication")) { medEditor = blankMedication() } }
                             }.padding(24)
@@ -122,11 +122,12 @@ struct RootView: View {
 }
 func blankMedication() -> Med { Med(id: 0, preset: "METHYLPHENIDATE_IR", usualDose: 0, name: "Methylphenidate IR", formulation: "METHYLPHENIDATE_IR", modelId: model("METHYLPHENIDATE_IR")) }
 struct EstimateView: View {
-    let med: Med;let document: Document
+    let med: Med;let document: Document;let revision: Int
     @State var showInfo = false
-    var points: [Double] { (try? decoded(NativeBridge.shared.curve(document: encoded(document), medicationId: med.id, now: millis()), as: [Double].self)) ?? [] }
+    @State private var points: [Double] = []
+    @State private var phaseKey = "UNAVAILABLE"
     var phase: String {
-        let key = (try? NativeBridge.shared.phase(document: encoded(document), medicationId: med.id, now: millis())) ?? "UNAVAILABLE"
+        let key = phaseKey
         return l(["UNAVAILABLE":"Estimate unavailable", "NO_LOGS":"No doses logged", "RECENT":"Recently logged", "LOW":"Low estimated level", "PEAK":"Near estimated peak", "RISING":"Estimate increasing", "DECREASING":"Estimate decreasing"][key] ?? "Estimate unavailable")
     }
     var body: some View {
@@ -145,6 +146,14 @@ struct EstimateView: View {
             Text(l("Rough relative estimate, not a medical measurement. Do not use it to decide when to take a dose.")).font(.footnote)
             Button(l("About this estimate")) { showInfo = true }
         }.padding().background(Color(.secondarySystemGroupedBackground),in: RoundedRectangle(cornerRadius: 12))
+            .task(id: "\(med.id)-\(revision)-\(millis()/30000)") {
+                let snapshot = document,medID = med.id,now = millis()
+                let result = await Task.detached { () -> ([Double],String) in
+                    guard let json = try? encoded(snapshot) else { return ([],"UNAVAILABLE") }
+                    return ((try? decoded(NativeBridge.shared.curve(document: json,medicationId: medID,now: now),as: [Double].self)) ?? [],(try? NativeBridge.shared.phase(document: json,medicationId: medID,now: now)) ?? "UNAVAILABLE")
+                }.value
+                guard !Task.isCancelled else { return };points = result.0;phaseKey = result.1
+            }
             .alert(l("About this estimate"), isPresented: $showInfo) { Button(l("Got it")) {} } message: {
                 Text(l("A simplified curve uses typical peak times and half-lives from product labels. It is not a validated prediction of your blood level, symptom control, or safe dosing.")+"\n"+l("Curves are scaled separately. They cannot compare medications or days.")+"\n"+l("Sources: DailyMed Ritalin, Ritalin LA (IR comparison) and Vyvanse capsule labels. Models: ritalin-ir-v1 / vyvanse-capsule-v1. Engine: relative-heuristic-v1."))
             }

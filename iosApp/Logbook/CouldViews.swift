@@ -52,17 +52,23 @@ struct MeasurementForm: View {
 struct WeeklyView: View {
     @EnvironmentObject var store: LogbookStore
     @State var selected = Date()
+    @State private var week: WeeklyValue?
     var body: some View {
         List {
             DatePicker(l("Choose week"),selection: $selected,displayedComponents: .date)
             HStack { Button(l("Previous week")) { selected = Calendar.current.date(byAdding: .day,value: -7,to: selected)! };Spacer();Button(l("Next week")) { selected = Calendar.current.date(byAdding: .day,value: 7,to: selected)! } }
-            if let week = try? store.state.document.weekly(selected) {
+            if let week {
                 Text(date(week.days[0].start).formatted(date: .abbreviated,time: .omitted)+" – "+date(week.days[6].start).formatted(date: .abbreviated,time: .omitted)+" · "+TimeZone.current.identifier)
                 ForEach(Array(week.summary.lines.enumerated()),id: \.offset) { Text($0.element) }
                 WeeklyDetails(week: week, medications: store.state.document.medications)
 
             }
         }.navigationTitle(l("Weekly overview"))
+        .task(id: "\(store.revision)-\(selected)-\(TimeZone.current.identifier)") {
+            let document = store.state.document,day = selected
+            let result = await Task.detached { try? document.weekly(day) }.value
+            guard !Task.isCancelled else { return };week = result
+        }
     }
 }
 private struct WeeklyDetails: View {
@@ -83,7 +89,7 @@ private struct WeeklyDetails: View {
     }
     private func distributionText(_ d: DistributionValue) -> String {
         let rating = d.value.map { " \($0) / 4" } ?? ""
-        return l(categoryName(d.category))+" · "+l(responseName(d.response))+rating+": \(d.count)"
+        return l(categoryName(d.category))+" · "+l(ratingDescription(d.category,d.scaleVersion ?? 1))+" · "+l(responseName(d.response))+rating+": \(d.count)"
     }
 }
 private struct WeeklyDaySection: View {
@@ -97,7 +103,7 @@ private struct WeeklyDaySection: View {
             ForEach(day.measurements) { m in record(time(m.timestamp)+" · "+measurementText(m),notes: m.notes) }
             ForEach(day.nonUse) { n in
                 VStack(alignment: .leading) {
-                    Text(l("Not taken")+" · "+(medications.first { $0.id == n.medicationId }?.name ?? ""))
+                    Text(l(nonUseName(n.recordKind))+" · "+(medications.first { $0.id == n.medicationId }?.name ?? ""))
                     Text(date(n.start).formatted()+" – "+date(n.end).formatted())
                     if !n.notes.isEmpty { Text(n.notes) }
                 }

@@ -12,6 +12,7 @@ struct ExportView: View {
     @State var pdf = true
     @State var file: URL?
     @State var working = false
+    @State var generation = UUID()
     var entries: [Entry] { let start = Calendar.current.startOfDay(for: from),end = Calendar.current.date(byAdding: .day,value: 1,to: Calendar.current.startOfDay(for: to))!;return store.state.document.entries.filter { date($0.timestamp) >= start && date($0.timestamp) < end } }
     var body: some View {
         Form {
@@ -30,20 +31,28 @@ struct ExportView: View {
                 TextField(l("Questions for my appointment"),text: $questions,axis: .vertical).lineLimit(2...6)
                 if let preview = try? store.state.document.summary(from: from,to: to) { ForEach(Array(preview.lines.enumerated()),id: \.offset) { Text($0.element) } }
             }
-            Button(l("Export report")) {
+            Button(l("Create report")) {
                 var document = store.state.document
                 if !includeNotes { document.measurements = document.measurements.map { var m = $0;m.notes = "";return m };document.entries = document.entries.map { var e = $0;e.notes = "";return e };document.observations = document.observations.map { var o = $0;o.notes = "";return o };document.nonUse = document.nonUse.map { var n = $0;n.notes = "";return n } }
-                let selectedEntries = document.entries.filter { e in entries.contains { $0.id == e.id } }, start = from, end = to, makePDF = pdf, makeSummary = summary, appointment = questions
+                let a = millis(Calendar.current.startOfDay(for: from)), b = millis(Calendar.current.date(byAdding: .day,value: 1,to: Calendar.current.startOfDay(for: to))!)
+                let selectedEntries = document.entries.filter { $0.timestamp >= a && $0.timestamp < b }, start = from, end = to, makePDF = pdf, makeSummary = summary, appointment = questions
                 let captured = document
-                working = true
+                file = nil;working = true;generation = UUID()
+                let request = generation, revision = store.revision
                 Task {
-                    do { file = try await Task.detached { try NativeReports.create(document: captured,entries: selectedEntries,from: start,to: end,pdf: makePDF,summary: makeSummary,questions: appointment) }.value }
+                    do {
+                        let result = try await Task.detached { try NativeReports.create(document: captured,entries: selectedEntries,from: start,to: end,pdf: makePDF,summary: makeSummary,questions: appointment) }.value
+                        if request == generation && revision == store.revision { file = result }
+                    }
                     catch { store.error = l("Could not export this report. Please try again.") }
                     working = false
                 }
             }.disabled(working || questions.count > 5000 || to < Calendar.current.startOfDay(for: from) || to.timeIntervalSince(from) > 366*86400)
-            if let file { ShareLink(item: file) { Label(l("Export report"),systemImage: "square.and.arrow.up") } }
-        }.navigationTitle(l("Export"))
+            if working { ProgressView(l("Preparing report…")) }
+            if let file, !working { ShareLink(item: file) { Label(l("Share report"),systemImage: "square.and.arrow.up") } }
+        }.disabled(working).navigationTitle(l("Export"))
+            .onChange(of: store.revision) { _ in file = nil;generation = UUID() }
+            .onDisappear { file = nil;generation = UUID() }
             .onChange(of: from) { _ in file = nil }.onChange(of: to) { _ in file = nil }.onChange(of: pdf) { _ in file = nil }.onChange(of: summary) { _ in file = nil }.onChange(of: includeNotes) { _ in file = nil }.onChange(of: questions) { _ in file = nil }
     }
 }
@@ -56,11 +65,11 @@ enum NativeReports {
         }
         let file = folder.appendingPathComponent("ADHS-logbook-\(UUID().uuidString).\(pdf ? "pdf" : "csv")")
         if !pdf {
-            let headers = ["schema_version","record_type","record_id","medication_id","medication","formulation","amount","unit","timestamp_iso8601","end_timestamp_iso8601","timezone","category","response","scale_version","value","sleep_date","linked_dose_id","dose_mood","notes","strength","model_id","stock_units","measurement_kind","measurement_value","systolic","diastolic","created_at_iso8601"]
+            let headers = ["schema_version","record_type","record_id","medication_id","medication","formulation","amount","unit","timestamp_iso8601","end_timestamp_iso8601","timezone","category","response","scale_version","value","sleep_date","linked_dose_id","dose_mood","notes","strength","model_id","stock_units","measurement_kind","measurement_value","systolic","diastolic","created_at_iso8601","non_use_kind"]
             var rows = [headers]
             let iso = ISO8601DateFormatter()
             func timestamp(_ stamp: Int64,_ offset: String) -> String { iso.timeZone = fixedOffset(offset);return iso.string(from: date(stamp)) }
-            func row(_ values: [String:String]) { rows.append(headers.map { $0 == "schema_version" ? "3" : values[$0] ?? "" }) }
+            func row(_ values: [String:String]) { rows.append(headers.map { $0 == "schema_version" ? "4" : values[$0] ?? "" }) }
             for e in entries {
                 row(["record_type":"dose","record_id":String(e.id),"medication_id":String(e.medicationId),"medication":e.medicationName,"formulation":e.formulation,"amount":String(e.doseMg),"unit":e.unit,"timestamp_iso8601":timestamp(e.timestamp,e.offset),"timezone":e.zoneId,"dose_mood":e.mood.map(String.init) ?? "","notes":e.notes,"strength":e.strength,"model_id":e.modelId ?? "","stock_units":e.supplyUnits.map { String($0) } ?? ""])
             }
@@ -71,8 +80,8 @@ enum NativeReports {
             for m in document.measurements where m.timestamp >= a && m.timestamp < b {
                 row(["record_type":"measurement","record_id":m.id,"measurement_kind":m.kind,"measurement_value":m.kind == "pressure" ? "" : String(m.value),"systolic":m.kind == "pressure" ? String(m.value) : "","diastolic":m.diastolic.map { String($0) } ?? "","unit":m.unit,"timestamp_iso8601":timestamp(m.timestamp,m.offset),"created_at_iso8601":timestamp(m.createdAt,"Z"),"timezone":m.zoneId,"notes":m.notes])
             }
-            for n in document.nonUse where n.start < b && n.end >= a {
-                row(["record_type":"non_use","record_id":n.id,"medication_id":String(n.medicationId),"medication":document.medications.first { $0.id == n.medicationId }?.name ?? "","timestamp_iso8601":timestamp(n.start,n.offset),"end_timestamp_iso8601":timestamp(n.end,n.offset),"timezone":n.zoneId,"notes":n.notes])
+            for n in document.nonUse where n.intersects(a,b) {
+                row(["record_type":"non_use","record_id":n.id,"medication_id":String(n.medicationId),"medication":document.medications.first { $0.id == n.medicationId }?.name ?? "","timestamp_iso8601":timestamp(n.start,n.offset),"end_timestamp_iso8601":timestamp(n.end,n.offset),"timezone":n.zoneId,"notes":n.notes,"non_use_kind":n.recordKind])
             }
             let content = rows.map { $0.map { Csv.shared.cell(value: $0) }.joined(separator: ",") }.joined(separator: "\r\n")
             try content.write(to: file,atomically: true,encoding: .utf8)
@@ -145,10 +154,10 @@ enum NativeReports {
                     let a = millis(current),b = millis(Calendar.current.date(byAdding: .day,value: 1,to: current)!)
                     for o in document.observations.filter({ $0.timestamp >= a && $0.timestamp < b }).sorted(by: { $0.timestamp < $1.timestamp }) {
                         let line = date(o.timestamp).formatted(date: .omitted,time: .shortened)+" · "+l(categoryName(o.category))+" · "+l(responseName(o.response))+(o.value.map { " \($0) / 4" } ?? "")+(o.sleepDate.map { " · \($0)" } ?? "")
-                        details.append((o.timestamp,[line]+(o.notes.isEmpty ? [] : [o.notes])))
+                        details.append((o.timestamp,[line]+(o.response == "rated" ? [l(ratingDescription(o.category,o.scaleVersion))] : [])+(o.notes.isEmpty ? [] : [o.notes])))
                     }
-                    for n in document.nonUse where n.start < b && n.end >= a {
-                        let line = l("Not taken")+" · "+(document.medications.first { $0.id == n.medicationId }?.name ?? "")+" · "+date(n.start).formatted()+" – "+date(n.end).formatted()
+                    for n in document.nonUse where n.intersects(a,b) {
+                        let line = l(nonUseName(n.recordKind))+" · "+(document.medications.first { $0.id == n.medicationId }?.name ?? "")+" · "+date(n.start).formatted()+" – "+date(n.end).formatted()
                         details.append((n.start,[line]+(n.notes.isEmpty ? [] : [n.notes])))
                     }
                     for m in document.measurements where m.timestamp >= a && m.timestamp < b { details.append((m.timestamp,[date(m.timestamp).formatted(date: .omitted,time: .shortened)+" · "+measurementText(m)]+(m.notes.isEmpty ? [] : [m.notes]))) }

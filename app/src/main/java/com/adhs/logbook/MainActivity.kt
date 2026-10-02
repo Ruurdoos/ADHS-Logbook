@@ -595,6 +595,10 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
     var questions by rememberSaveable { mutableStateOf("") }
     var formatName by rememberSaveable { mutableStateOf(ReportFormat.PDF.name) }
     var exporting by remember { mutableStateOf(false) }
+    var prepared by remember { mutableStateOf<java.io.File?>(null) }
+    val requestKey=listOf(document,start,end,formatName,summary,includeNotes,questions)
+    val latestRequest by rememberUpdatedState(requestKey)
+    LaunchedEffect(requestKey) { prepared?.delete();prepared=null }
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
     val from=LocalDate.parse(start); val to=LocalDate.parse(end)
@@ -612,7 +616,7 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
         ReportFormat.entries.forEach { format ->
             Surface(color=if(formatName==format.name) Pale else MaterialTheme.colorScheme.surface,shape=MaterialTheme.shapes.medium,modifier=Modifier.fillMaxWidth().clickable { formatName=format.name }) {
                 Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
-                    RadioButton(formatName==format.name,{ formatName=format.name })
+                    RadioButton(formatName==format.name,{ formatName=format.name },Modifier.semantics { contentDescription=format.name })
                     Column { Text(tr(if(format==ReportFormat.PDF) "PDF report" else "CSV")); Note(if(format==ReportFormat.PDF) "Graphs, doses, mood & notes" else "Open in a spreadsheet") }
                 }
             }
@@ -620,8 +624,8 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
         when { invalid -> Note("Choose a valid range of up to 366 days."); count==0 -> Note("No doses logged. This does not confirm that no medication was taken."); else -> Note(tr("Entries: %d · %s",count,ZoneId.systemDefault().id)) }
         Note("Only your selected dates are included. You choose where to share the file.")
         Spacer(Modifier.weight(1f))
-        Row { Checkbox(summary,{ summary=it });Text(tr("Summary with details")) }
-        Row { Checkbox(includeNotes,{ includeNotes=it });Text(tr("Include free-text notes")) }
+        Row { Checkbox(summary,{ summary=it },Modifier.semantics { contentDescription=tr("Summary with details") });Text(tr("Summary with details")) }
+        Row { Checkbox(includeNotes,{ includeNotes=it },Modifier.semantics { contentDescription=tr("Include free-text notes") });Text(tr("Include free-text notes")) }
         if(summary) {
             OutlinedTextField(questions,{ questions=it.take(5000) },label={ Text(tr("Questions for my appointment")) },minLines=2)
             if(!invalid) {
@@ -629,17 +633,20 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
                 SummaryPreview(SummaryBuilder.build(document,boundaries))
             }
         }
-        Primary(if(exporting) "Preparing report…" else "Export report",!invalid && !exporting) {
+        Primary(if(exporting) "Preparing report…" else "Create report",!invalid && !exporting) {
             exporting=true
+            val request=requestKey
+            val selectedSummary=summary;val selectedNotes=includeNotes;val selectedQuestions=questions
+            val format=ReportFormat.valueOf(formatName)
             scope.launch {
                 try {
-                    val format=ReportFormat.valueOf(formatName)
-                    val file=withContext(Dispatchers.IO) { Reports.createDocument(context,document,from,to,format,summary,includeNotes,questions) }
-                    Reports.share(context,file,format)
-                } catch(e: Exception) { snackbar.showSnackbar(tr("Could not export this report. Please try again.")) }
+                    val file=withContext(Dispatchers.IO) { Reports.createDocument(context,document,from,to,format,selectedSummary,selectedNotes,selectedQuestions) }
+                    if(latestRequest==request) prepared=file else file.delete()
+                } catch(e: kotlinx.coroutines.CancellationException) { throw e } catch(e: Exception) { snackbar.showSnackbar(tr("Could not export this report. Please try again.")) }
                 finally { exporting=false }
             }
         }
+        prepared?.let { file -> Primary("Share report",!exporting) { Reports.share(context,file,ReportFormat.valueOf(formatName)) } }
     }
 }
 

@@ -55,14 +55,14 @@ object Reports {
         try {
             if(format==ReportFormat.PDF) writePdf(file,doc.entries,entries,start,end,zone,timeFormat(context),doc,summary,questions)
             else file.bufferedWriter().use { out ->
-                val header=listOf("schema_version","record_type","record_id","medication_id","medication","formulation","amount","unit","timestamp_iso8601","end_timestamp_iso8601","timezone","category","response","scale_version","value","sleep_date","linked_dose_id","dose_mood","notes","strength","model_id","stock_units","measurement_kind","measurement_value","systolic","diastolic","created_at_iso8601")
+                val header=listOf("schema_version","record_type","record_id","medication_id","medication","formulation","amount","unit","timestamp_iso8601","end_timestamp_iso8601","timezone","category","response","scale_version","value","sleep_date","linked_dose_id","dose_mood","notes","strength","model_id","stock_units","measurement_kind","measurement_value","systolic","diastolic","created_at_iso8601","non_use_kind")
                 out.write(Csv.row(header))
                 fun timestamp(time: Long,offset: String)=Instant.ofEpochMilli(time).atOffset(ZoneOffset.of(offset)).toString()
-                fun write(values: Map<String,String>) { out.write(Csv.row(header.map { if(it=="schema_version") "3" else values[it] ?: "" })) }
+                fun write(values: Map<String,String>) { out.write(Csv.row(header.map { if(it=="schema_version") "4" else values[it] ?: "" })) }
                 entries.forEach { e -> write(mapOf("record_type" to "dose","record_id" to e.id.toString(),"medication_id" to e.medicationId.toString(),"medication" to e.medicationName,"formulation" to e.formulation,"amount" to e.doseMg.toString(),"unit" to e.unit,"timestamp_iso8601" to timestamp(e.timestamp,e.offset),"timezone" to e.zoneId,"dose_mood" to (e.mood?.toString() ?: ""),"notes" to e.notes,"strength" to e.strength,"model_id" to (e.modelId ?: ""),"stock_units" to (e.supplyUnits?.toString() ?: ""))) }
                 doc.observations.filter { it.timestamp>=a && it.timestamp<b }.forEach { o -> write(mapOf("record_type" to "observation","record_id" to o.id,"timestamp_iso8601" to timestamp(o.timestamp,o.offset),"timezone" to o.zoneId,"category" to o.category,"response" to o.response,"scale_version" to o.scaleVersion.toString(),"value" to (o.value?.toString() ?: ""),"sleep_date" to (o.sleepDate ?: ""),"linked_dose_id" to (o.doseId?.toString() ?: ""),"notes" to o.notes)) }
                 doc.measurements.filter { it.timestamp>=a && it.timestamp<b }.forEach { m -> write(mapOf("record_type" to "measurement","record_id" to m.id,"measurement_kind" to m.kind,"measurement_value" to if(m.kind=="pressure") "" else m.value.toString(),"systolic" to if(m.kind=="pressure") m.value.toString() else "","diastolic" to (m.diastolic?.toString() ?: ""),"unit" to m.unit,"timestamp_iso8601" to timestamp(m.timestamp,m.offset),"created_at_iso8601" to Instant.ofEpochMilli(m.createdAt).toString(),"timezone" to m.zoneId,"notes" to m.notes)) }
-                doc.nonUse.filter { it.start<b && it.end>=a }.forEach { n -> write(mapOf("record_type" to "non_use","record_id" to n.id,"medication_id" to n.medicationId.toString(),"medication" to (doc.medications.find { it.id==n.medicationId }?.name ?: ""),"timestamp_iso8601" to timestamp(n.start,n.offset),"end_timestamp_iso8601" to timestamp(n.end,n.offset),"timezone" to n.zoneId,"notes" to n.notes)) }
+                doc.nonUse.filter { it.intersects(a,b) }.forEach { n -> write(mapOf("record_type" to "non_use","record_id" to n.id,"medication_id" to n.medicationId.toString(),"medication" to (doc.medications.find { it.id==n.medicationId }?.name ?: ""),"timestamp_iso8601" to timestamp(n.start,n.offset),"end_timestamp_iso8601" to timestamp(n.end,n.offset),"timezone" to n.zoneId,"notes" to n.notes,"non_use_kind" to n.kind)) }
             }
         } catch(e: Exception) { file.delete();throw e }
         return file
@@ -112,12 +112,13 @@ object Reports {
                 doc?.observations?.filter { it.timestamp>=from && it.timestamp<until }?.forEach { o ->
                     details += o.timestamp to {
                         writer.paragraph(Instant.ofEpochMilli(o.timestamp).atZone(zone).format(clockFormat)+" · "+tr(categoryName(o.category))+" · "+tr(responseName(o.response))+(o.value?.let { " $it / 4" } ?: "")+(o.sleepDate?.let { " · $it" } ?: ""))
+                        if(o.response=="rated") writer.paragraph(tr(ratingDescription(o.category,o.scaleVersion)))
                         if(o.notes.isNotBlank()) writer.paragraph(o.notes)
                     }
                 }
-                doc?.nonUse?.filter { it.start<until && it.end>=from }?.forEach { n ->
+                doc?.nonUse?.filter { it.intersects(from,until) }?.forEach { n ->
                     details += n.start to {
-                        writer.paragraph(tr("Not taken")+" · "+(doc.medications.find { it.id==n.medicationId }?.name ?: "")+" · "+Instant.ofEpochMilli(n.start).atZone(zone)+" – "+Instant.ofEpochMilli(n.end).atZone(zone))
+                        writer.paragraph(tr(nonUseName(n.kind))+" · "+(doc.medications.find { it.id==n.medicationId }?.name ?: "")+" · "+Instant.ofEpochMilli(n.start).atZone(zone)+" – "+Instant.ofEpochMilli(n.end).atZone(zone))
                         if(n.notes.isNotBlank()) writer.paragraph(n.notes)
                     }
                 }

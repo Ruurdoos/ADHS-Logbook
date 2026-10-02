@@ -114,3 +114,28 @@ private struct WeeklyDaySection: View {
         return time(o.timestamp)+" · "+l(categoryName(o.category))+" · "+l(responseName(o.response))+rating
     }
 }
+struct QuickAccessView: View {
+    @EnvironmentObject var store: LogbookStore
+    @State var enabled = UserDefaults.standard.bool(forKey: "quick.enabled")
+    @State var selected: Int64 = 0
+    @State var showLast = UserDefaults.standard.bool(forKey: "quick.last")
+    @State var saved = false
+    var body: some View {
+        Form {
+            Toggle(l("Enable quick access"),isOn: $enabled).disabled(WidgetFiles.directory == nil).onChange(of: enabled) { value in UserDefaults.standard.set(value,forKey: "quick.enabled");store.publishWidget() }
+            if WidgetFiles.directory == nil { Text(l("Widget sharing is unavailable in this build.")) }
+            Text(l("Shortcuts open review. Opening a link never saves a dose."))
+            if enabled {
+                Text(l("In Shortcuts, add Open dose editor. Leave the shortcut empty for generic review, or choose Configured medication after setup here."))
+                Picker(l("Optional medication shortcut"),selection: $selected) { Text(l("Choose medication")).tag(Int64(0));ForEach(store.state.document.medications.filter(\.active)) { Text($0.name).tag($0.id) } }
+                Button(l("Create review shortcut")) { if let med = store.state.document.medications.first(where: { $0.id == selected && $0.active }) { store.attempt { let config = QuickConfigurationValue(token: UUID().uuidString,medicationId: med.id,revision: med.revision);UserDefaults.standard.set(try JSONEncoder().encode(config),forKey: "quick.configuration");store.publishWidget();saved = true } } }.disabled(selected == 0)
+                if saved { Text(l("Review shortcut configured.")) }
+                Text(l("Add ADHS Logbook from the Lock Screen widget gallery. It opens review after unlocking."))
+                Toggle(l("Show last-log timestamp on Lock Screen"),isOn: $showLast).onChange(of: showLast) { value in UserDefaults.standard.set(value,forKey: "quick.last");store.publishWidget() }
+                Text(l("Off by default. App lock always hides the timestamp."))
+                Text(l("Public labels stay generic. Changes to medication settings require review."))
+            }
+        }.navigationTitle(l("Quick access"))
+            .onAppear { if let data = UserDefaults.standard.data(forKey: "quick.configuration"),let c = try? JSONDecoder().decode(QuickConfigurationValue.self,from: data) { selected = c.medicationId } }
+    }
+}

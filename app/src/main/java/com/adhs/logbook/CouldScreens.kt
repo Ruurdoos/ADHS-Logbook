@@ -69,3 +69,22 @@ fun weekBounds(start: LocalDate,zone: ZoneId)= (0L..7L).map { start.plusDays(it)
         day.nonUse.forEach { Text(tr("Not taken")+" · "+(document.medications.find { med->med.id==it.medicationId }?.name ?: "")+" · "+Instant.ofEpochMilli(it.start).atZone(zone)+" – "+Instant.ofEpochMilli(it.end).atZone(zone));if(it.notes.isNotBlank()) Text(it.notes) }
     }
 }
+@Composable fun QuickAccessSettings(state: LogbookState) {
+    val context=LocalContext.current
+    var enabled by rememberSaveable { mutableStateOf(QuickAccess.enabled(context)) }
+    var selected by rememberSaveable { mutableLongStateOf(QuickAccess.configuration(context)?.medicationId ?: 0) }
+    var error by remember { mutableStateOf(false) }
+    fun attempt(action: ()->Unit) { error=runCatching(action).isFailure }
+    Text(tr("Quick access"),style=MaterialTheme.typography.headlineSmall)
+    Row { Switch(enabled,{ value -> attempt { QuickAccess.enable(context,value);enabled=QuickAccess.enabled(context) } },Modifier.semantics { contentDescription=tr("Enable quick access") });Text(tr("Enable quick access")) }
+    if(error) Text(tr("Could not save or load data. Please try again."),color=MaterialTheme.colorScheme.error)
+    Text(tr("Shortcuts open review. Opening a link never saves a dose."))
+    if(enabled) {
+        Text(tr("Hold the app icon for Log dose. Add the tile from Quick Settings edit mode."))
+        if(android.os.Build.VERSION.SDK_INT>=33) Button({ attempt { QuickAccess.addTile(context) } }) { Text(tr("Add Quick Settings tile")) }
+        Text(tr("Optional medication shortcut"))
+        state.medications.filter { it.active }.forEach { med -> FilterChip(selected==med.id,{ selected=med.id },label={ Text(med.name) }) }
+        Button({ state.medications.find { it.id==selected && it.active }?.let { attempt { QuickAccess.configure(context,it);QuickAccess.pin(context) } } },enabled=state.medications.any { it.id==selected && it.active }) { Text(tr("Create review shortcut")) }
+        Text(tr("Public labels stay generic. Changes to medication settings require review."))
+    }
+}

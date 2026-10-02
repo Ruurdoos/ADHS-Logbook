@@ -318,5 +318,62 @@ object TextCatalog {
         "Continued notes for entry %d" to "Weitere Notizen zu Eintrag %d",
         "Export medication log" to "Medikamentenprotokoll exportieren"
     )
-    fun text(key: String, language: String): String = if(language == "de") german[key] ?: key else key
+    private val revised = mapOf("Optional observations" to "Show observation shortcut on Home", "Legacy dose mood (separate from observations)" to "Mood recorded with doses", "＋ Log dose" to "Edit amount or time", "Log dose" to "Edit amount or time", "Log now · %s %s" to "Record %s %s now")
+    fun text(key: String, language: String): String {
+        val label=revised[key] ?: key
+        return if(language=="de") additions[label] ?: german[label] ?: label else label
+    }
+    private val additions = mapOf(
+        "Start without medication" to "Ohne Medikament beginnen",
+        "Record observations and measurements, with or without medication." to "Erfasse Beobachtungen und Messwerte, mit oder ohne Medikament.",
+        "Your log could not be opened. Restore a backup to recover your records." to "Dein Protokoll konnte nicht geöffnet werden. Stelle deine Aufzeichnungen aus einem Backup wieder her.",
+        "Sleep quality: 0 = very poor · 4 = very good" to "Schlafqualität: 0 = sehr schlecht · 4 = sehr gut",
+        "Original sleep scale: 0 = very low · 4 = very high" to "Ursprüngliche Schlafskala: 0 = sehr niedrig · 4 = sehr hoch",
+        "Everyday functioning: 0 = very low · 4 = very high" to "Alltagsbewältigung: 0 = sehr niedrig · 4 = sehr hoch",
+        "Mood: 0 = very low · 4 = very high" to "Stimmung: 0 = sehr niedrig · 4 = sehr hoch",
+        "Appetite: 0 = very low · 4 = very high" to "Appetit: 0 = sehr niedrig · 4 = sehr hoch",
+        "Symptom intensity: 0 = very low · 4 = very high" to "Symptomstärke: 0 = sehr niedrig · 4 = sehr hoch",
+        "Noticed benefit: 0 = very low · 4 = very high" to "Bemerkter Nutzen: 0 = sehr niedrig · 4 = sehr hoch",
+        "Noticed fading: 0 = very low · 4 = very high" to "Bemerkte Abschwächung: 0 = sehr niedrig · 4 = sehr hoch",
+        "Very poor" to "Sehr schlecht",
+        "Poor" to "Schlecht",
+        "Fair" to "Mittelmäßig",
+        "Night starting on" to "Nacht ab",
+        "Scheduled dose not taken" to "Geplante Dosis nicht eingenommen",
+        "No doses taken on this day" to "An diesem Tag keine Dosis eingenommen",
+        "No doses taken during this period" to "In diesem Zeitraum keine Dosis eingenommen",
+        "Not taken (original record)" to "Nicht eingenommen (ursprünglicher Eintrag)",
+        "Choose a completed day. For today, record a period ending now." to "Wähle einen abgeschlossenen Tag. Erfasse für heute einen Zeitraum, der jetzt endet.",
+        "Choose a completed day or a period ending in the past." to "Wähle einen abgeschlossenen Tag oder einen Zeitraum, der in der Vergangenheit endet.",
+        "Record type" to "Art des Eintrags",
+        "Enter a medication name." to "Gib einen Medikamentennamen ein.",
+        "Notes must be 5,000 characters or fewer." to "Notizen dürfen höchstens 5.000 Zeichen enthalten.",
+        "Medication details are too long. Shorten the name, formulation or strength." to "Die Medikamentenangaben sind zu lang. Kürze Name, Darreichungsform oder Stärke.",
+        "When changing medication, enter the amount again and check its unit." to "Gib beim Wechsel des Medikaments die Menge erneut ein und prüfe die Einheit.",
+        "Search medications and notes" to "Medikamente und Notizen durchsuchen",
+        "All medications" to "Alle Medikamente",
+        "Archived medications" to "Archivierte Medikamente",
+        "Reactivate" to "Wieder aktivieren",
+        "No archived medications." to "Keine archivierten Medikamente.",
+        "No reminder times. Add a time to receive reminders." to "Keine Erinnerungszeiten. Füge eine Zeit hinzu, um Erinnerungen zu erhalten.",
+        "Reminders are paused." to "Erinnerungen sind pausiert.",
+        "Reminders are scheduled." to "Erinnerungen sind geplant.",
+        "A reminder already exists at this time. Edit it instead." to "Für diese Uhrzeit besteht bereits eine Erinnerung. Bearbeite sie.",
+        "Save settings without recounting" to "Einstellungen ohne neue Zählung speichern",
+        "Notifications are off in system settings. Enable them to receive supply alerts." to "Benachrichtigungen sind in den Systemeinstellungen deaktiviert. Aktiviere sie für Vorratsmeldungen.",
+        "Non-use periods overlap. Edit the existing record first." to "Zeiträume ohne Einnahme überschneiden sich. Bearbeite zuerst den vorhandenen Eintrag.",
+        "Create report" to "Bericht erstellen",
+        "Share report" to "Bericht teilen",
+        "Observations: %d · Measurements: %d · Non-use: %d" to "Beobachtungen: %d · Messwerte: %d · Nicht-Einnahmen: %d",
+        "Observations: %d · Measurements: %d · Non-use records: %d" to "Beobachtungen: %d · Messwerte: %d · Nicht-Einnahmen: %d",
+        "Retry" to "Erneut versuchen",
+        "Discard changes?" to "Änderungen verwerfen?",
+        "Discard" to "Verwerfen",
+        "Keep editing" to "Weiter bearbeiten",
+
+        "Show observation shortcut on Home" to "Beobachtungs-Schnellzugriff auf der Startseite zeigen",
+        "Mood recorded with doses" to "Stimmung bei der Einnahme",
+        "Edit amount or time" to "Menge oder Zeitpunkt bearbeiten",
+        "Record %s %s now" to "Jetzt %s %s erfassen"
+    )
 }

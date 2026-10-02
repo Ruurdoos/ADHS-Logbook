@@ -14,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -70,7 +72,7 @@ object AppPrivacy {
         androidx.activity.compose.BackHandler { activity.moveTaskToBack(true) }
         Column(Modifier.fillMaxSize().padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
             Text(tr("Logbook locked"),style=MaterialTheme.typography.headlineMedium)
-            Button({ AppPrivacy.authenticate(activity,{ message=null },{ message=it }) }) { Text(tr("Unlock logbook")) }
+            Button({ AppPrivacy.authenticate(activity,{ message=null },{ message=it }) },Modifier.semantics { contentDescription=tr("App lock") }) { Text(tr("Unlock logbook")) }
             message?.let { Text(it) }
         }
     }
@@ -80,7 +82,7 @@ object AppPrivacy {
     var message by remember { mutableStateOf<String?>(null) }
     Row(verticalAlignment=Alignment.CenterVertically) {
         Text(tr("App lock"),Modifier.weight(1f))
-        Switch(AppPrivacy.enabled,{ desired -> AppPrivacy.authenticate(activity,{ runCatching { AppPrivacy.setEnabled(activity,desired) }.onFailure { message=tr("Could not save or load data. Please try again.") } },{ message=it }) })
+        Switch(AppPrivacy.enabled,{ desired -> AppPrivacy.authenticate(activity,{ runCatching { AppPrivacy.setEnabled(activity,desired) }.onFailure { message=tr("Could not save or load data. Please try again.") } },{ message=it }) },Modifier.semantics { contentDescription=tr("App lock") })
     }
     Text(tr("Relocks when you leave the app. Exported files remain outside this lock; this is not whole-database encryption."),style=MaterialTheme.typography.bodySmall)
     message?.let { Text(it) }

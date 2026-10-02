@@ -13,6 +13,7 @@ struct MeasurementForm: View {
     @State var notes = ""
     @State var convert = false
     @State var deleting = false
+    @State var discarding = false
     init(original: MeasurementValue) {
         _original = State(initialValue: original);_kind = State(initialValue: original.kind)
         _value = State(initialValue: original.value > 0 ? number(original.value) : "");_lower = State(initialValue: original.diastolic.map(number) ?? "")
@@ -38,15 +39,16 @@ struct MeasurementForm: View {
                 if existing { Button(l("Delete record"),role: .destructive) { deleting = true } }
             }.navigationTitle(l("Measurements"))
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) { Button(l("Save")) {
+                    ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { discarding = true } }
+                    ToolbarItem(placement: .confirmationAction) { Button(l("Save")) { guard !store.busy else { return };
                         var m = original;m.kind = kind;m.value = parseNumber(value)!;m.diastolic = kind == "pressure" ? parseNumber(lower) : nil;m.unit = unit;m.notes = notes
                         if abs(m.timestamp-millis(time)) > 1 { m.zoneId = TimeZone.current.identifier;m.offset = zoneOffset(time) };m.timestamp = millis(time)
-                        store.attempt { try store.saveMeasurement(m);dismiss() }
+                        store.attempt { try await store.saveMeasurement(m);dismiss() }
                     }.disabled(parseNumber(value) == nil || (kind == "pressure" && parseNumber(lower) == nil) || notes.count > 5000) }
                 }
-                .confirmationDialog(l("Delete record?"),isPresented: $deleting) { Button(l("Delete"),role: .destructive) { store.attempt { try store.deleteMeasurement(original.id);dismiss() } } }
-        }
+                .confirmationDialog(l("Delete record?"),isPresented: $deleting) { Button(l("Delete"),role: .destructive) { store.attempt { try await store.deleteMeasurement(original.id);dismiss() } } }
+        }.disabled(store.busy).interactiveDismissDisabled()
+        .confirmationDialog(l("Discard changes?"),isPresented: $discarding,titleVisibility: .visible) { Button(l("Discard"),role: .destructive) { dismiss() };Button(l("Keep editing"),role: .cancel) {} }
     }
 }
 struct WeeklyView: View {

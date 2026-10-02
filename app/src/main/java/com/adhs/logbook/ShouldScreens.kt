@@ -143,13 +143,13 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     var timed by rememberSaveable { mutableStateOf(original.until!=null) }
     var until by rememberSaveable { mutableLongStateOf(original.until ?: System.currentTimeMillis()+86400000) }
     Text(tr("Pause reminders"),style=MaterialTheme.typography.headlineSmall)
-    Row { Switch(paused,{ paused=it });Text(tr("Pause reminders")) }
+    Row { Switch(paused,{ paused=it },Modifier.semantics { contentDescription=tr("Pause reminders") });Text(tr("Pause reminders")) }
     Text(tr("This pauses notifications only. It does not record medication use or non-use."))
-    if(paused) { Row { Checkbox(timed,{ timed=it });Text(tr("Resume at a chosen time")) };if(timed) TimeField("Resume at",until) { until=it } }
+    if(paused) { Row { Checkbox(timed,{ timed=it },Modifier.semantics { contentDescription=tr("Resume at a chosen time") });Text(tr("Resume at a chosen time")) };if(timed) TimeField("Resume at",until) { until=it } }
     Button({ save(ReminderPause(paused,if(paused && timed) until else null)) },enabled=!busy && (!paused || !timed || until>System.currentTimeMillis())) { Text(tr("Save")) }
 }
-@Composable private fun SupplyEditor(state: LogbookState,vm: LogbookViewModel,busy: Boolean,close: ()->Unit) {
-    var medId by rememberSaveable { mutableStateOf("") }
+@Composable private fun SupplyEditor(state: LogbookState,vm: LogbookViewModel,busy: Boolean,close: ()->Unit,initialMed: Long? = null) {
+    var medId by rememberSaveable { mutableStateOf(initialMed?.toString() ?: "") }
     val med=state.medications.find { it.id.toString()==medId }
     val existing=state.supplies.find { it.medicationId==med?.id }
     var unit by rememberSaveable(medId) { mutableStateOf(existing?.unitLabel ?: "") }
@@ -197,7 +197,7 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     var message by remember { mutableStateOf<String?>(null) }
     Text(tr("Home-screen widget"),style=MaterialTheme.typography.headlineSmall)
     Choice("Medication",state.medications.filter { it.active }.map { it.id.toString() to it.name },medId) { medId=it }
-    Row { Checkbox(private,{ private=it });Text(tr("Generic widget content")) }
+    Row { Checkbox(private,{ private=it },Modifier.semantics { contentDescription=tr("Generic widget content") });Text(tr("Generic widget content")) }
     Text(tr("App lock always hides widget details. Changed medication settings require review in the app."))
     Button({ state.medications.find { it.id.toString()==medId }?.let { med ->
         LogWidget.configure(context,med.id,med.revision,private)

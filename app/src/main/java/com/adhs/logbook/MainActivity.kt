@@ -311,7 +311,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
             Surface(color=if(checked) Pale else MaterialTheme.colorScheme.surface,shape=MaterialTheme.shapes.medium,
                 modifier=Modifier.fillMaxWidth().clickable { presetName=item.name;unit="mg" }) {
                 Row(Modifier.padding(8.dp),verticalAlignment=Alignment.CenterVertically) {
-                    RadioButton(checked,{ presetName=item.name;unit="mg" })
+                    RadioButton(checked,{ presetName=item.name;unit="mg" },Modifier.semantics { contentDescription=tr(item.title) })
                     Text(tr(item.title),Modifier.weight(1f).padding(end=8.dp))
                 }
             }
@@ -479,7 +479,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         }
         OutlinedTextField(dose,{ dose=it },Modifier.fillMaxWidth(),label={ Text(tr("Dose (%s)",tr(entry?.unit?.takeIf { medId==entry.medicationId } ?: chosen?.unit ?: "mg"))) },keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),singleLine=true)
         if(onNonUse!=null && entry==null) TextButton({ onNonUse(medId) }) { Text(tr("Record not taken")) }
-        if(entry==null) Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) { Text(tr("Taken now"),Modifier.weight(1f)); Switch(useNow,{ useNow=it }) }
+        if(entry==null) Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) { Text(tr("Taken now"),Modifier.weight(1f)); Switch(useNow,{ useNow=it },Modifier.semantics { contentDescription=tr("Taken now") }) }
         if(!useNow) {
             val date=LocalDate.parse(dateText); val time=LocalTime.parse(timeText)
             OutlinedButton({ pickDate(context,date) { dateText=it.toString() } },Modifier.fillMaxWidth().heightIn(min=48.dp)) { Icon(Icons.Outlined.CalendarToday,null); Spacer(Modifier.width(12.dp)); Text(date.format(dayFormat)) }

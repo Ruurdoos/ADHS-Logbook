@@ -151,7 +151,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
             val prefs=context.getSharedPreferences("widget",Context.MODE_PRIVATE)
             val med=state.medications.find { it.id==prefs.getLong("med",0) && it.active }
             if(med!=null && widgetIntent.isNotBlank() && widgetIntent==prefs.getString("token",null) && med.revision==prefs.getLong("revision",0)) {
-                if(prefs.getBoolean("private",true)) { selectedMedication=med.id;editingEntry=-1 }
+                if(AppPrivacy.enabled || prefs.getBoolean("private",true)) { selectedMedication=med.id;editingEntry=-1 }
                 else vm.widgetLog(med,widgetIntent) { id -> scope.launch { if(snackbar.showSnackbar(tr("Dose logged"),tr("Undo"))==SnackbarResult.ActionPerformed) vm.delete(id) } }
             } else { med?.let { selectedMedication=it.id;editingEntry=-1 };errorMessage=tr("Widget changed. Review the medication and amount in the app.") }
             onWidgetHandled()

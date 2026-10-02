@@ -263,8 +263,8 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
         let token = reviewOnly ? String(rawToken.dropFirst(14)) : rawToken
         let prefs = UserDefaults.standard
         guard let med = state.document.medications.first(where: { $0.id == Int64(prefs.integer(forKey: "widget.med")) && $0.active }) else { error = l("Widget changed. Review the medication and amount in the app.");return }
-        guard token == prefs.string(forKey: "widget.token"), med.revision == Int64(prefs.integer(forKey: "widget.revision")), !prefs.bool(forKey: "widget.generic"), !reviewOnly else { widgetReview = med.id;return }
-        attempt { try quick(med,action: "widget:"+token);invalidateWidget() }
+        guard token == prefs.string(forKey: "widget.token"), med.revision == Int64(prefs.integer(forKey: "widget.revision")), !prefs.bool(forKey: "widget.generic"), !PrivacyController.shared.enabled, !reviewOnly else { widgetReview = med.id;return }
+        attempt { [self] in try await self.quick(med,action: "widget:"+token);self.invalidateWidget() }
     }
     func enableSupplyNotifications(_ enabled: Bool) {
         attempt { try change { $0.supplyNotificationsEnabled = enabled } }

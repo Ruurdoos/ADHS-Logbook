@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -110,6 +111,12 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
     val state by vm.state.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     var shouldPage by rememberSaveable { mutableStateOf<String?>(null) }
+    var parentPages by rememberSaveable { mutableStateOf(listOf<String>()) }
+    val pageState=rememberSaveableStateHolder()
+    fun closePage() {
+        shouldPage?.let { pageState.removeState(it) }
+        shouldPage=parentPages.lastOrNull();parentPages=parentPages.dropLast(1)
+    }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var welcome by rememberSaveable { mutableStateOf(true) }
     var editingMedication by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -151,7 +158,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
             val prefs=context.getSharedPreferences("widget",Context.MODE_PRIVATE)
             val med=state.medications.find { it.id==prefs.getLong("med",0) && it.active }
             if(med!=null && widgetIntent.isNotBlank() && widgetIntent==prefs.getString("token",null) && med.revision==prefs.getLong("revision",0)) {
-                if(prefs.getBoolean("private",true)) { selectedMedication=med.id;editingEntry=-1 }
+                if(AppPrivacy.enabled || prefs.getBoolean("private",true)) { selectedMedication=med.id;editingEntry=-1 }
                 else vm.widgetLog(med,widgetIntent) { id -> scope.launch { if(snackbar.showSnackbar(tr("Dose logged"),tr("Undo"))==SnackbarResult.ActionPerformed) vm.delete(id) } }
             } else { med?.let { selectedMedication=it.id;editingEntry=-1 };errorMessage=tr("Widget changed. Review the medication and amount in the app.") }
             onWidgetHandled()
@@ -164,6 +171,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
     LaunchedEffect(state.loaded) {
         if(state.loaded) withContext(Dispatchers.IO) { ReminderScheduler.reschedule(context,state) }
     }
+    LaunchedEffect(editingEntry) { if(editingEntry==null) pageState.removeState("dose-draft") }
     fun saved(id: Long) {
         editingEntry = null
         occurrenceId = null
@@ -171,8 +179,12 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
             if(snackbar.showSnackbar(tr("Dose logged"), tr("Undo"), duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) vm.delete(id)
         }
     }
+    var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    fun leaveEditor(action: ()->Unit) { discardAction=action }
+    fun leavePage() { if(shouldPage?.let { it.startsWith("observation:") || it.startsWith("measurement:") || it.startsWith("nonuse") || it=="pause" || it.startsWith("supply") }==true) leaveEditor { closePage() } else closePage() }
+    discardAction?.let { action -> AlertDialog(onDismissRequest={ discardAction=null },title={ Text(tr("Discard changes?")) },confirmButton={ TextButton({ discardAction=null;action() }) { Text(tr("Discard")) } },dismissButton={ TextButton({ discardAction=null }) { Text(tr("Keep editing")) } }) }
     BackHandler(shouldPage!=null || editingEntry != null || editingMedication != null || tab != 0) {
-        when { shouldPage!=null -> shouldPage=null;editingEntry != null -> editingEntry = null; editingMedication != null -> editingMedication = null; else -> tab = 0 }
+        when { shouldPage!=null -> leavePage();editingEntry != null -> leaveEditor { editingEntry = null }; editingMedication != null -> leaveEditor { editingMedication = null }; else -> tab = 0 }
     }
     Scaffold(
         containerColor = Paper,
@@ -193,28 +205,37 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).imePadding()) {
             when {
-                shouldPage!=null -> ShouldScreen(shouldPage!!,state,vm,{ if(shouldPage!!.startsWith("nonuse-occ:")) { editingEntry=null;occurrenceId=null };shouldPage=null },{ shouldPage=it })
-                !state.loaded -> Box(Modifier.fillMaxSize(),contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                !state.onboarded && welcome -> Welcome { welcome = false }
+                shouldPage=="backup" -> ScrollPage { TextButton({ closePage() }) { Text(tr("Back")) };BackupControls(vm,busy) }
+                shouldPage!=null -> pageState.SaveableStateProvider(shouldPage!!) {
+                    ShouldScreen(shouldPage!!,state,vm,{ if(shouldPage!!.startsWith("nonuse-occ:")) { editingEntry=null;occurrenceId=null };closePage() },{ parentPages=parentPages+shouldPage!!;shouldPage=it },back={ leavePage() })
+                }
+                !state.loaded -> Box(Modifier.fillMaxSize(),contentAlignment = Alignment.Center) {
+                    if(state.loadError==null) CircularProgressIndicator() else Column(Modifier.padding(24.dp)) {
+                        Text(state.loadError!!);Button({ vm.refresh() }) { Text(tr("Try again")) }
+                        TextButton({ shouldPage="backup" }) { Text(tr("Restore backup")) }
+                    }
+                }
+                !state.onboarded && welcome -> Welcome({ welcome=false },{ vm.startWithoutMedication() },{ shouldPage="backup" })
                 !state.onboarded || editingMedication != null -> MedicationEditor(
                     medication = state.medications.find { it.id == editingMedication }, busy = busy,
                     onboarding = !state.onboarded,
-                    onBack = { if(state.onboarded) editingMedication = null else welcome = true },
+                    onBack = { leaveEditor { if(state.onboarded) editingMedication = null else welcome = true } },
                     onSave = { med -> vm.medication(med) { editingMedication = null } },
                 )
-                editingEntry != null -> EntryEditor(
+                editingEntry != null -> pageState.SaveableStateProvider("dose-draft") { EntryEditor(
                     entry = state.entries.find { it.id == editingEntry }, medications = state.medications, supplies=state.supplies, onNonUse=occurrenceId?.let { id -> { med: Long -> shouldPage="nonuse-occ:$id:$med" } },
-                    selected = selected, busy = busy, onBack = { editingEntry = null; occurrenceId=null },
+                    selected = selected, busy = busy, onBack = { leaveEditor { editingEntry = null; occurrenceId=null } },
                     onSave = { entry, actionId -> vm.save(entry,actionId,occurrenceId) { id ->
                         if(entry.id == 0L) saved(id) else { editingEntry = null; scope.launch { snackbar.showSnackbar(tr("Changes saved")) } }
                     } },
                     onDelete = { id -> vm.delete(id) { editingEntry = null; scope.launch { snackbar.showSnackbar(tr("Entry deleted")) } } },
-                )
+                ) }
                 tab == 0 -> Column {
                     if(vm.observationsEnabled()) TextButton({ shouldPage="observation:" }) { Text(tr("Add observation")) }
+                    if(active.isEmpty() || vm.enabled("measurements_enabled")) TextButton({ shouldPage="measurement:" }) { Text(tr("Add measurement")) }
                     state.supplies.filter { it.medicationId==selected?.id }.forEach { supply ->
                         val balance=SupplyLedger.balance(vm.document(),supply)
-                        if(balance.inconsistent || balance.remaining<=supply.lowThreshold || (supply.prescriptionDate?.let { it<=System.currentTimeMillis() }==true)) TextButton({ shouldPage="supply" }) { Text(tr("Estimated remaining: %s %s",doseText(balance.remaining),supply.unitLabel)) }
+                        if(balance.inconsistent || balance.remaining<=supply.lowThreshold || (supply.prescriptionDate?.let { it<=System.currentTimeMillis() }==true)) TextButton({ shouldPage="supply:${supply.medicationId}" }) { Text(tr("Estimated remaining: %s %s",doseText(balance.remaining),supply.unitLabel)) }
                     }
                     HomeScreen(state,selected,busy,{ selectedMedication = it },{ editingEntry = -1 },{
                     selected?.let { vm.quick(it,::saved) }
@@ -259,7 +280,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min=availableHeight).padding(24.dp),verticalArrangement=Arrangement.spacedBy(20.dp),content=content)
     }
 }
-@Composable private fun Welcome(onStart: () -> Unit) {
+@Composable private fun Welcome(onStart: () -> Unit,onSkip: ()->Unit,onRestore: ()->Unit) {
     ScrollPage {
         Spacer(Modifier.height(40.dp))
         Text(tr("ADHS LOGBOOK"),color=Sage,letterSpacing=2.sp,fontSize=12.sp,fontWeight=FontWeight.Bold)
@@ -268,6 +289,8 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         Spacer(Modifier.weight(1f))
         Note("Private. Stored on this device.")
         Primary("Get started",onClick=onStart)
+        TextButton(onSkip) { Text(tr("Start without medication")) }
+        TextButton(onRestore) { Text(tr("Restore backup")) }
     }
 }
 
@@ -288,13 +311,13 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
             Surface(color=if(checked) Pale else MaterialTheme.colorScheme.surface,shape=MaterialTheme.shapes.medium,
                 modifier=Modifier.fillMaxWidth().clickable { presetName=item.name;unit="mg" }) {
                 Row(Modifier.padding(8.dp),verticalAlignment=Alignment.CenterVertically) {
-                    RadioButton(checked,{ presetName=item.name;unit="mg" })
+                    RadioButton(checked,{ presetName=item.name;unit="mg" },Modifier.semantics { contentDescription=tr(item.title) })
                     Text(tr(item.title),Modifier.weight(1f).padding(end=8.dp))
                 }
             }
         }
         if(custom) {
-            OutlinedTextField(name,{ name=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Medication name")) },isError=attempted && name.isBlank())
+            OutlinedTextField(name,{ name=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Medication name")) },isError=attempted && name.isBlank(),supportingText={ if(attempted && name.isBlank()) Text(tr("Enter a medication name.")) })
             OutlinedTextField(formulation,{ formulation=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Formulation (optional)")) })
             OutlinedTextField(strength,{ strength=it.take(100) },Modifier.fillMaxWidth(),label={ Text(tr("Strength with unit (optional)")) },supportingText={ Text(tr("For your records only; no dose conversion.")) })
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { doseUnits.forEach { value -> FilterChip(selected=unit==value,onClick={ unit=value },label={ Text(tr(value)) }) } }
@@ -334,7 +357,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
                 Surface(color=MaterialTheme.colorScheme.surface,shape=MaterialTheme.shapes.large) {
                     Column(Modifier.padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                         Text(tr("Your log starts here."),fontSize=22.sp)
-                        Note("Add a medication to start your log.")
+                        Note("Record observations and measurements, with or without medication.")
                         Primary("Add medication",onClick=onAdd)
                     }
                 }
@@ -456,7 +479,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         }
         OutlinedTextField(dose,{ dose=it },Modifier.fillMaxWidth(),label={ Text(tr("Dose (%s)",tr(entry?.unit?.takeIf { medId==entry.medicationId } ?: chosen?.unit ?: "mg"))) },keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),singleLine=true)
         if(onNonUse!=null && entry==null) TextButton({ onNonUse(medId) }) { Text(tr("Record not taken")) }
-        if(entry==null) Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) { Text(tr("Taken now"),Modifier.weight(1f)); Switch(useNow,{ useNow=it }) }
+        if(entry==null) Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) { Text(tr("Taken now"),Modifier.weight(1f)); Switch(useNow,{ useNow=it },Modifier.semantics { contentDescription=tr("Taken now") }) }
         if(!useNow) {
             val date=LocalDate.parse(dateText); val time=LocalTime.parse(timeText)
             OutlinedButton({ pickDate(context,date) { dateText=it.toString() } },Modifier.fillMaxWidth().heightIn(min=48.dp)) { Icon(Icons.Outlined.CalendarToday,null); Spacer(Modifier.width(12.dp)); Text(date.format(dayFormat)) }
@@ -520,13 +543,24 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
 
 @Composable private fun HistoryScreen(entries: List<DoseEntry>,onEdit: (Long) -> Unit) {
     var filter by rememberSaveable { mutableStateOf<String?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var medicationFilter by rememberSaveable { mutableStateOf<Long?>(null) }
+    var medicationMenu by remember { mutableStateOf(false) }
     val context=LocalContext.current
     val timeFormat=timeFormat(context)
     val zone=ZoneId.systemDefault()
-    val grouped=entries.filter { filter==null || Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate().toString()==filter }
+    val grouped=entries.filter { (filter==null || Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate().toString()==filter) && (medicationFilter==null || it.medicationId==medicationFilter) && (query.isBlank() || it.medicationName.contains(query,true) || it.notes.contains(query,true)) }
         .groupBy { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal=24.dp),contentPadding=PaddingValues(vertical=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         item { Title("History") }
+        item { OutlinedTextField(query,{ query=it },Modifier.fillMaxWidth(),label={ Text(tr("Search medications and notes")) }) }
+        item { Box {
+            OutlinedButton({ medicationMenu=true }) { Text(entries.firstOrNull { it.medicationId==medicationFilter }?.medicationName ?: tr("All medications")) }
+            DropdownMenu(medicationMenu,{ medicationMenu=false }) {
+                DropdownMenuItem(text={ Text(tr("All medications")) },onClick={ medicationFilter=null;medicationMenu=false })
+                entries.distinctBy { it.medicationId }.forEach { e -> DropdownMenuItem(text={ Text(e.medicationName) },onClick={ medicationFilter=e.medicationId;medicationMenu=false }) }
+            }
+        } }
         item { Row(verticalAlignment=Alignment.CenterVertically) {
             OutlinedButton({ pickDate(context,filter?.let(LocalDate::parse) ?: LocalDate.now()) { filter=it.toString() } }) { Icon(Icons.Outlined.CalendarToday,null); Spacer(Modifier.width(8.dp)); Text(filter ?: tr("Choose day")) }
             if(filter!=null) TextButton({ filter=null }) { Text(tr("Show all")) }
@@ -561,6 +595,10 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
     var questions by rememberSaveable { mutableStateOf("") }
     var formatName by rememberSaveable { mutableStateOf(ReportFormat.PDF.name) }
     var exporting by remember { mutableStateOf(false) }
+    var prepared by remember { mutableStateOf<java.io.File?>(null) }
+    val requestKey=listOf(document,start,end,formatName,summary,includeNotes,questions)
+    val latestRequest by rememberUpdatedState(requestKey)
+    LaunchedEffect(requestKey) { prepared?.delete();prepared=null }
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
     val from=LocalDate.parse(start); val to=LocalDate.parse(end)
@@ -578,7 +616,7 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
         ReportFormat.entries.forEach { format ->
             Surface(color=if(formatName==format.name) Pale else MaterialTheme.colorScheme.surface,shape=MaterialTheme.shapes.medium,modifier=Modifier.fillMaxWidth().clickable { formatName=format.name }) {
                 Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
-                    RadioButton(formatName==format.name,{ formatName=format.name })
+                    RadioButton(formatName==format.name,{ formatName=format.name },Modifier.semantics { contentDescription=format.name })
                     Column { Text(tr(if(format==ReportFormat.PDF) "PDF report" else "CSV")); Note(if(format==ReportFormat.PDF) "Graphs, doses, mood & notes" else "Open in a spreadsheet") }
                 }
             }
@@ -586,8 +624,8 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
         when { invalid -> Note("Choose a valid range of up to 366 days."); count==0 -> Note("No doses logged. This does not confirm that no medication was taken."); else -> Note(tr("Entries: %d · %s",count,ZoneId.systemDefault().id)) }
         Note("Only your selected dates are included. You choose where to share the file.")
         Spacer(Modifier.weight(1f))
-        Row { Checkbox(summary,{ summary=it });Text(tr("Summary with details")) }
-        Row { Checkbox(includeNotes,{ includeNotes=it });Text(tr("Include free-text notes")) }
+        Row { Checkbox(summary,{ summary=it },Modifier.semantics { contentDescription=tr("Summary with details") });Text(tr("Summary with details")) }
+        Row { Checkbox(includeNotes,{ includeNotes=it },Modifier.semantics { contentDescription=tr("Include free-text notes") });Text(tr("Include free-text notes")) }
         if(summary) {
             OutlinedTextField(questions,{ questions=it.take(5000) },label={ Text(tr("Questions for my appointment")) },minLines=2)
             if(!invalid) {
@@ -595,17 +633,20 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
                 SummaryPreview(SummaryBuilder.build(document,boundaries))
             }
         }
-        Primary(if(exporting) "Preparing report…" else "Export report",!invalid && !exporting) {
+        Primary(if(exporting) "Preparing report…" else "Create report",!invalid && !exporting) {
             exporting=true
+            val request=requestKey
+            val selectedSummary=summary;val selectedNotes=includeNotes;val selectedQuestions=questions
+            val format=ReportFormat.valueOf(formatName)
             scope.launch {
                 try {
-                    val format=ReportFormat.valueOf(formatName)
-                    val file=withContext(Dispatchers.IO) { Reports.createDocument(context,document,from,to,format,summary,includeNotes,questions) }
-                    Reports.share(context,file,format)
-                } catch(e: Exception) { snackbar.showSnackbar(tr("Could not export this report. Please try again.")) }
+                    val file=withContext(Dispatchers.IO) { Reports.createDocument(context,document,from,to,format,selectedSummary,selectedNotes,selectedQuestions) }
+                    if(latestRequest==request) prepared=file else file.delete()
+                } catch(e: kotlinx.coroutines.CancellationException) { throw e } catch(e: Exception) { snackbar.showSnackbar(tr("Could not export this report. Please try again.")) }
                 finally { exporting=false }
             }
         }
+        prepared?.let { file -> Primary("Share report",!exporting) { Reports.share(context,file,ReportFormat.valueOf(formatName)) } }
     }
 }
 
@@ -614,6 +655,7 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
     val timeFormat=timeFormat(context)
     var configureReminder by remember { mutableStateOf<Reminder?>(null) }
     var remove by remember { mutableStateOf<Medication?>(null) }
+    var archived by rememberSaveable { mutableStateOf(false) }
     var denied by remember { mutableStateOf(!NotificationManagerCompat.from(context).areNotificationsEnabled()) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -632,6 +674,13 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
                 IconButton({ remove=med },enabled=!busy) { Icon(Icons.Outlined.Close,tr("Remove %s",med.name)) }
             }
         }
+        item { TextButton({ archived=!archived }) { Text(tr("Archived medications")) } }
+        if(archived) {
+            if(state.medications.none { !it.active }) item { Text(tr("No archived medications.")) }
+            items(state.medications.filter { !it.active },key={ "archived-${it.id}" }) { med -> Row {
+                Text(med.name,Modifier.weight(1f));TextButton({ vm.medication(med.copy(active=true)) {} },enabled=!busy) { Text(tr("Reactivate")) }
+            } }
+        }
         item { TextButton({ onMedication(-1) },enabled=!busy) { Text(tr("＋ Add medication")) }; HorizontalDivider() }
         item {
             Row(verticalAlignment=Alignment.CenterVertically) {
@@ -639,11 +688,12 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
                 Switch(state.remindersEnabled,{ enabled ->
                     if(enabled && Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
                     else { denied=!NotificationManagerCompat.from(context).areNotificationsEnabled(); vm.reminders(enabled) }
-                },enabled=!busy)
+                },enabled=!busy,modifier=Modifier.semantics { contentDescription=tr("Reminders") })
             }
             Note("A gentle reminder to log. Delivery may be delayed by battery settings.")
         }
         if(state.remindersEnabled) {
+            item { Note(when { denied -> "Notifications are turned off. Your reminder times are saved.";state.pause.active(System.currentTimeMillis()) -> "Reminders are paused.";state.reminders.isEmpty() -> "No reminder times. Add a time to receive reminders.";else -> "Reminders are scheduled." }) }
             items(state.reminders,key={ "reminder-${it.id}" }) { reminder ->
                 Row(verticalAlignment=Alignment.CenterVertically) {
                     OutlinedButton({ TimePickerDialog(context,{ _,h,m -> vm.reminder(h,m,reminder.id) },reminder.hour,reminder.minute,android.text.format.DateFormat.is24HourFormat(context)).show() },Modifier.weight(1f),enabled=!busy) { Text(LocalTime.of(reminder.hour,reminder.minute).format(timeFormat)) }
@@ -663,9 +713,9 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
         item { TextButton({ onShould("pause") }) { Text(tr(if(state.pause.active(System.currentTimeMillis())) "Resume / change pause" else "Pause reminders")) } }
         item { TextButton({ onShould("widget") }) { Text(tr("Home-screen widget")) } }
         item { TextButton({ onShould("supply") }) { Text(tr("Supply")) } }
-        item { Row { Text(tr("Optional observations"),Modifier.weight(1f));Switch(vm.observationsEnabled(),{ vm.preference("observations_enabled",it.toString()) }) } }
-        item { Row { Text(tr("Measurements"),Modifier.weight(1f));Switch(vm.enabled("measurements_enabled"),{ vm.preference("measurements_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Measurements") }) }; Text(tr("Available in observations. Disabling keeps saved records.")) }
-        item { Row { Text(tr("Weekly overview"),Modifier.weight(1f));Switch(vm.enabled("weekly_enabled"),{ vm.preference("weekly_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Weekly overview") }) } }
+        item { Row { Text(tr("Optional observations"),Modifier.weight(1f));Switch(vm.observationsEnabled(),{ vm.preference("observations_enabled",it.toString()) },enabled=!busy,modifier=Modifier.semantics { contentDescription=tr("Show observation shortcut on Home") }) } }
+        item { Row { Text(tr("Measurements"),Modifier.weight(1f));Switch(vm.enabled("measurements_enabled"),{ vm.preference("measurements_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Measurements") },enabled=!busy) }; Text(tr("Available in observations. Disabling keeps saved records.")) }
+        item { Row { Text(tr("Weekly overview"),Modifier.weight(1f));Switch(vm.enabled("weekly_enabled"),{ vm.preference("weekly_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Weekly overview") },enabled=!busy) } }
         item { TextButton({ onShould("quick") }) { Text(tr("Quick access")) } }
         item { BackupControls(vm,busy) }
         item { TextButton(onExport) { Text(tr("Export your log →")) } }

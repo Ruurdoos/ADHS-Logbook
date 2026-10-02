@@ -35,7 +35,7 @@ class ShouldTest {
         assertEquals(doc,BackupFormat.decode(BackupFormat.encode(doc)))
         assertFails { BackupFormat.validate(doc.copy(observations=listOf(observation.copy(response="rated")))) }
         assertFails { BackupFormat.validate(doc.copy(observations=listOf(observation.copy(value=0)))) }
-        assertFails { BackupFormat.validate(doc.copy(observations=listOf(observation.copy(scaleVersion=2)))) }
+        assertFails { BackupFormat.validate(doc.copy(observations=listOf(observation.copy(scaleVersion=99)))) }
     }
     @Test fun nonUseDoesNotBecomeDoseOrOverlapRecordedDoses() {
         val n=NonUse("n",1,100,200,201,"UTC","Z")
@@ -66,5 +66,32 @@ class ShouldTest {
         assertFails { BackupFormat.validate(old.copy(pause=ReminderPause(true))) }
         assertTrue(PrivacyPolicy.needsAuthentication(true,false));assertFalse(PrivacyPolicy.needsAuthentication(true,true))
         assertFalse(PrivacyPolicy.externalMayWrite(true));assertTrue(PrivacyPolicy.externalMayWrite(false))
+    }
+    @Test fun sleepQualityDoesNotMergeWithLegacySleep() {
+        val old=Observation("old","sleep","rated",2,100,100,"UTC","Z",sleepDate="2026-10-01")
+        val quality=old.copy(id="quality",scaleVersion=2)
+        val doc=document().copy(observations=listOf(old,quality))
+        val decoded=BackupFormat.decode(BackupFormat.encode(doc))
+        assertEquals(listOf(1,2),decoded.observations.map { it.scaleVersion })
+        val week=WeeklyBuilder.build(decoded,listOf(0,200,400,600,800,1000,1200,1400))
+        assertEquals(2,week.distributions.size)
+        assertFails { BackupFormat.validate(doc.copy(version=3)) }
+    }
+    @Test fun newNonUseIntervalsExcludeEndAndScheduledMissesAllowOtherDoses() {
+        val period=NonUse("period",1,100,200,201,"UTC","Z",kind="period")
+        assertTrue(period.contains(100));assertFalse(period.contains(200))
+        assertFalse(period.intersects(200,300))
+        BackupFormat.validate(document().copy(nonUse=listOf(period),entries=listOf(dose(1,200))))
+        assertFails { BackupFormat.validate(document().copy(nonUse=listOf(period),entries=listOf(dose(1,199)))) }
+        val missed=period.copy(id="missed",end=100,occurrenceId="reminder-token",kind="scheduled")
+        BackupFormat.validate(document().copy(nonUse=listOf(missed),entries=listOf(dose(1,100))))
+        assertFalse(missed.contains(100))
+        assertTrue(period.copy(kind="legacy").contains(200))
+    }
+    @Test fun adjacentDaysDoNotOverlapButLegacyEndpointsStillDo() {
+        val first=NonUse("first",1,100,200,300,"UTC","Z",kind="day")
+        val second=first.copy(id="second",start=200,end=300)
+        BackupFormat.validate(document().copy(nonUse=listOf(first,second)))
+        assertFails { BackupFormat.validate(document().copy(nonUse=listOf(first.copy(kind="legacy"),second))) }
     }
 }

@@ -5,13 +5,17 @@ import LogbookShared
 @MainActor
 final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     @Published private(set) var state = DiskState()
+    @Published private(set) var revision = 0
     @Published var error: String?
     @Published var openOccurrence: String?
     @Published var widgetReview: Int64?
     @Published var undoID: Int64?
     @Published var scheduledThrough: Date?
+    @Published var notificationsAllowed: Bool?
+    @Published private(set) var loading = true
+    private var loadTask: Task<Void,Never>?
     private let location: URL
-    private var readable = true
+    @Published private(set) var readable = true
     private let notifications: Bool
     private var supplyGeneration = 0
     private let center = UNUserNotificationCenter.current()
@@ -21,15 +25,21 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
         let folder = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ADHSLogbook", isDirectory: true)
         location = folder.appendingPathComponent("logbook.json")
         super.init()
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            var url = folder; var values = URLResourceValues(); values.isExcludedFromBackup = true; try url.setResourceValues(values)
-            if FileManager.default.fileExists(atPath: location.path) {
-                let loaded = try JSONDecoder().decode(DiskState.self, from: Data(contentsOf: location))
-                guard loaded.schema == 1 else { throw AppError.invalid }
-                _ = try loaded.document.validated(); state = loaded
-            }
-        } catch { readable = false; self.error = l("Could not save or load data. Please try again.") }
+        let source = location
+        loadTask = Task { @MainActor in
+            do {
+                state = try await Task.detached(priority: .userInitiated) {
+                    try FileManager.default.createDirectory(at: folder,withIntermediateDirectories: true)
+                    var url = folder;var values = URLResourceValues();values.isExcludedFromBackup = true;try url.setResourceValues(values)
+                    guard FileManager.default.fileExists(atPath: source.path) else { return DiskState() }
+                    let loaded = try JSONDecoder().decode(DiskState.self,from: Data(contentsOf: source))
+                    guard loaded.schema == 1 else { throw AppError.invalid }
+                    _ = try loaded.document.validated();return loaded
+                }.value
+            } catch { readable = false;self.error = l("Could not save or load data. Please try again.") }
+            loading = false
+            if notifications { schedule();processWidget() }
+        }
         guard notifications else { return }
         WidgetFiles.listen()
         center.delegate = self
@@ -42,31 +52,68 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
             UNNotificationCategory(identifier: "LOCKED", actions: [open], intentIdentifiers: [], options: [])
         ])
     }
-    func change(_ edit: (inout DiskState) throws -> Void) throws {
+    func ready() async { await loadTask?.value }
+    @Published private(set) var busy = false
+    private var queue: Task<Void,Never>?
+    private var pendingActions = 0
+    private var writing = false
+    private var waiters: [CheckedContinuation<Void,Never>] = []
+    private func acquireWrite() async {
+        if writing { await withCheckedContinuation { waiters.append($0) } }
+        else { writing = true }
+    }
+    private func releaseWrite() {
+        if waiters.isEmpty { writing = false } else { waiters.removeFirst().resume() }
+    }
+    func waitForPendingActions() async { await queue?.value }
+    func change(_ edit: (inout DiskState) throws -> Void) async throws {
+        await ready()
+        await acquireWrite();defer { releaseWrite() }
         guard readable else { throw AppError.invalid }
-        var next = state; try edit(&next); next.document = try decoded(NativeBridge.shared.reconcile(document: encoded(next.document)),as: Document.self).validated()
-        let data = try JSONEncoder().encode(next)
-        try data.write(to: location, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        var next = state;try edit(&next)
+        let candidate = next, destination = location
+        next = try await Task.detached(priority: .userInitiated) {
+            var result = candidate
+            do { result.document = try decoded(NativeBridge.shared.reconcile(document: encoded(result.document)),as: Document.self).validated() }
+            catch { if let message = ((error as NSError).kotlinException as? KotlinThrowable)?.message,message != "Failed requirement." { throw AppError.validation(message) };throw error }
+            let data = try JSONEncoder().encode(result)
+            try data.write(to: destination,options: [.atomic,.completeFileProtectionUntilFirstUserAuthentication])
+            return result
+        }.value
         state = next
+        revision += 1
         if notifications { publishWidget() }
     }
-    func attempt(_ action: () throws -> Void) { do { try action() } catch { self.error = l("Could not save or load data. Please try again.") } }
+    func attempt(_ action: @escaping @MainActor () async throws -> Void) {
+        let previous = queue
+        pendingActions += 1;busy = true
+        queue = Task { @MainActor in
+            await previous?.value
+            do { try await action() }
+            catch AppError.validation(let message) { self.error = l(message) }
+            catch { self.error = l("Could not save or load data. Please try again.") }
+            pendingActions -= 1;busy = pendingActions > 0
+        }
+    }
     func nextID() -> Int64 { max(state.document.medications.map(\.id).max() ?? 0, state.document.entries.map(\.id).max() ?? 0, state.actions.values.max() ?? 0) + 1 }
-    func save(_ medication: Med) throws {
+    func save(_ medication: Med) async throws {
         var med = medication
-        if med.id == 0 { med.id = nextID() }
-        med.revision = (state.document.medications.first { $0.id == med.id }?.revision ?? 0) + 1
-        try change { s in s.document.medications.removeAll { $0.id == med.id };s.document.medications.append(med);s.document.preferences["onboarded"] = "true" }
+        try await change { s in
+            if med.id == 0 { med.id = nextID() };med.revision = (s.document.medications.first { $0.id == med.id }?.revision ?? 0) + 1; s.document.medications.removeAll { $0.id == med.id };s.document.medications.append(med);s.document.preferences["onboarded"] = "true" }
         schedule()
     }
     @discardableResult
-    func save(_ entry: Entry, action: String, occurrence: String? = nil) throws -> Int64 {
+    func save(_ entry: Entry, action: String, occurrence: String? = nil) async throws -> Int64 {
         if let existing = state.actions[action], entry.id == 0 { return existing }
-        var value = entry; if value.id == 0 { value.id = nextID() }
-        try change { s in
+        var value = entry
+        try await change { s in
+            if entry.id == 0, let existing = s.actions[action] { value.id = existing;return };if value.id == 0 { value.id = nextID() }
             s.document.entries.removeAll { $0.id == value.id };s.document.entries.append(value)
             s.document.entries.sort { $0.timestamp == $1.timestamp ? $0.id > $1.id : $0.timestamp > $1.timestamp }
             s.actions[action] = value.id
+            for i in s.occurrences.indices where s.occurrences[i].entryId == value.id {
+                if let med = s.document.reminders.first(where: { $0.id == s.occurrences[i].reminderId })?.medicationId,med != value.medicationId { s.occurrences[i].state = "undone";s.occurrences[i].entryId = nil }
+            }
             if let occurrence, let index = s.occurrences.firstIndex(where: { $0.id == occurrence && $0.state == "pending" }),
                let reminder = s.document.reminders.first(where: { $0.id == s.occurrences[index].reminderId }),
                reminder.medicationId == nil || reminder.medicationId == value.medicationId,
@@ -75,27 +122,28 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
             }
         }
         if let occurrence, state.occurrences.contains(where: { $0.id == occurrence && $0.state == "logged" }) { clear(occurrence) }
-        undoID = value.id; schedule();return value.id
+        undoID = entry.id == 0 ? value.id : nil; schedule();return value.id
     }
-    func quick(_ med: Med, action: String = UUID().uuidString, occurrence: String? = nil) throws {
+    func quick(_ med: Med, action: String = UUID().uuidString, occurrence: String? = nil) async throws {
         let now = Date()
         let entry = try decoded(NativeBridge.shared.quickEntry(medication: encoded(med), now: millis(now), zone: TimeZone.current.identifier, offset: zoneOffset(now)), as: Entry.self)
-        try save(entry, action: action, occurrence: occurrence)
+        try await save(entry, action: action, occurrence: occurrence)
     }
-    func delete(_ id: Int64) throws {
-        try change { s in s.document.entries.removeAll { $0.id == id };for i in s.document.observations.indices where s.document.observations[i].doseId == id { s.document.observations[i].doseId = nil };for i in s.occurrences.indices where s.occurrences[i].entryId == id { s.occurrences[i].state = "undone" } }
+    func delete(_ id: Int64) async throws {
+        try await change { s in s.document.entries.removeAll { $0.id == id };for i in s.document.observations.indices where s.document.observations[i].doseId == id { s.document.observations[i].doseId = nil };for i in s.occurrences.indices where s.occurrences[i].entryId == id { s.occurrences[i].state = "undone" } }
         if undoID == id { undoID = nil };schedule()
     }
-    func saveReminder(_ value: ReminderValue) throws {
+    func saveReminder(_ value: ReminderValue) async throws {
+        guard !state.document.reminders.contains(where: { $0.id != value.id && $0.hour == value.hour && $0.minute == value.minute }) else { throw AppError.validation("A reminder already exists at this time. Edit it instead.") }
         var r = value
         if r.id == 0 { r.id = (state.document.reminders.map(\.id).max() ?? 0) + 1 }
         r.revision = (state.document.reminders.first { $0.id == r.id }?.revision ?? 0) + 1
-        try change { s in s.document.reminders.removeAll { $0.id == r.id };s.document.reminders.append(r) };schedule()
+        try await change { s in s.document.reminders.removeAll { $0.id == r.id };s.document.reminders.append(r) };schedule()
     }
     func enableReminders(_ enabled: Bool) {
-        if !enabled { attempt { try change { $0.remindersEnabled = false } };schedule();return }
+        if !enabled { attempt { [self] in try await self.change { $0.remindersEnabled = false } };schedule();return }
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in Task { @MainActor in
-            self.attempt { try self.change { $0.remindersEnabled = true } }
+            self.attempt { [self] in try await self.change { $0.remindersEnabled = true } }
             if !granted { self.error = l("Notifications are turned off. Your reminder times are saved.") }
             self.schedule()
         } }
@@ -104,11 +152,12 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
         center.removePendingNotificationRequests(withIdentifiers: [id, id+"-follow", id+"-snooze"])
         center.removeDeliveredNotifications(withIdentifiers: [id, id+"-follow", id+"-snooze"])
     }
-    func schedule() {
+    func schedule() { attempt { [self] in await self.refreshSchedule() } }
+    private func refreshSchedule() async {
         guard readable && notifications else { return }
         let now = Date(), stamp = millis(now)
         do {
-            try change { s in
+            try await change { s in
                 for i in s.occurrences.indices {
                     let o = s.occurrences[i], r = s.document.reminders.first { $0.id == o.reminderId }
                     let m = s.document.medications.first { $0.id == r?.medicationId }
@@ -159,6 +208,7 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         Task { @MainActor in
             defer { completionHandler() }
+            await self.ready()
             guard let id = response.notification.request.content.userInfo["occurrence"] as? String,
                   let o = self.state.occurrences.first(where: { $0.id == id }),
                   let r = self.state.document.reminders.first(where: { $0.id == o.reminderId }) else { return }
@@ -171,9 +221,9 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
                     self.error = l("This reminder expired. Open your log to review.");self.clear(id);return
                 }
                 switch response.actionIdentifier {
-                case "LOG": if let med { try self.quick(med, action: "reminder:"+id, occurrence: id) }
+                case "LOG": if let med { try await self.quick(med, action: "reminder:"+id, occurrence: id) }
                 case "SNOOZE":
-                    try self.change { s in if let i = s.occurrences.firstIndex(where: { $0.id == id }) {
+                    try await self.change { s in if let i = s.occurrences.firstIndex(where: { $0.id == id }) {
                         s.occurrences[i].nextAlert = min(millis()+600000,o.expires);s.occurrences[i].followedUp = true
                     } };self.clear(id);self.schedule()
                 default: self.openOccurrence = id
@@ -181,31 +231,35 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
             } catch { self.error = l("Could not save or load data. Please try again.") }
         }
     }
-    func restore(_ document: Document) throws {
-        let valid = try document.validated()
-        try change { s in s.recovery = s.document;s.document = valid;s.remindersEnabled = false;s.actions = [:];s.occurrences = [];s.supplyAlerts = [:];s.supplyNotificationsEnabled = false }
+    func restore(_ document: Document) async throws {
+        await ready()
+        let valid = try await Task.detached { try document.validated() }.value
+        let wasReadable = readable
+        if !wasReadable, FileManager.default.fileExists(atPath: location.path) { try FileManager.default.copyItem(at: location,to: location.deletingLastPathComponent().appendingPathComponent("unreadable-"+UUID().uuidString+".json")) }
+        readable = true
+        do { try await change { s in s.recovery = wasReadable ? s.document : nil;s.document = valid;s.remindersEnabled = false;s.actions = [:];s.occurrences = [];s.supplyAlerts = [:];s.supplyNotificationsEnabled = false } } catch { readable = wasReadable;throw error }
         center.removeAllPendingNotificationRequests();center.removeAllDeliveredNotifications();undoID = nil
         for key in ["quick.enabled","quick.configuration","quick.last"] { UserDefaults.standard.removeObject(forKey: key) };invalidateWidget()
     }
 
-    func saveMeasurement(_ value: MeasurementValue) throws { try change { s in s.document.measurements.removeAll { $0.id == value.id };s.document.measurements.append(value) } }
-    func deleteMeasurement(_ id: String) throws { try change { $0.document.measurements.removeAll { $0.id == id } } }
+    func saveMeasurement(_ value: MeasurementValue) async throws { try await change { s in s.document.measurements.removeAll { $0.id == value.id };s.document.measurements.append(value) } }
+    func deleteMeasurement(_ id: String) async throws { try await change { $0.document.measurements.removeAll { $0.id == id } } }
     func reviewShortcut(_ token: String) {
         guard !PrivacyController.shared.enabled || PrivacyController.shared.unlocked else { return }
-        attempt {
+        do {
             let config = UserDefaults.standard.data(forKey: "quick.configuration").flatMap { String(data: $0,encoding: .utf8) }
             let route = try decoded(NativeBridge.shared.review(token: token,enabled: UserDefaults.standard.bool(forKey: "quick.enabled"),configuration: config,document: encoded(state.document)),as: ReviewRouteValue.self)
             guard !route.unavailable, let med = state.document.medications.first(where: { $0.active && (route.medicationId == nil || $0.id == route.medicationId) }) else { error = l("Quick access is unavailable. Open Settings to configure it.");return }
             widgetReview = med.id
             if route.changed { error = l("Medication settings changed. Review the current amount.") }
-        }
+        } catch { self.error = l("Quick access is unavailable. Open Settings to configure it.") }
     }
-    func saveObservation(_ value: ObservationValue) throws {
-        try change { s in s.document.observations.removeAll { $0.id == value.id };s.document.observations.append(value) }
+    func saveObservation(_ value: ObservationValue) async throws {
+        try await change { s in s.document.observations.removeAll { $0.id == value.id };s.document.observations.append(value) }
     }
-    func deleteObservation(_ id: String) throws { try change { $0.document.observations.removeAll { $0.id == id } } }
-    func saveNonUse(_ value: NonUseValue) throws {
-        try change { s in
+    func deleteObservation(_ id: String) async throws { try await change { $0.document.observations.removeAll { $0.id == id } } }
+    func saveNonUse(_ value: NonUseValue) async throws {
+        try await change { s in
             if let occurrence = value.occurrenceId, let i = s.occurrences.firstIndex(where: { $0.id == occurrence }) {
                 guard ["pending","not_taken"].contains(s.occurrences[i].state), let reminder = s.document.reminders.first(where: { $0.id == s.occurrences[i].reminderId }), reminder.medicationId == nil || reminder.medicationId == value.medicationId else { throw AppError.invalid }
                 s.occurrences[i].state = "not_taken"
@@ -213,25 +267,30 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
             s.document.nonUse.removeAll { $0.id == value.id };s.document.nonUse.append(value)
         };schedule()
     }
-    func deleteNonUse(_ id: String) throws {
-        try change { s in
+    func deleteNonUse(_ id: String) async throws {
+        try await change { s in
             if let occurrence = s.document.nonUse.first(where: { $0.id == id })?.occurrenceId, let i = s.occurrences.firstIndex(where: { $0.id == occurrence }) { s.occurrences[i].state = "expired" }
             s.document.nonUse.removeAll { $0.id == id }
         };schedule()
     }
-    func pause(_ value: PauseValue) throws { try change { $0.document.pause = value };schedule() }
-    func saveSupply(_ value: SupplyValue,count: Double,action: String) throws {
+    func pause(_ value: PauseValue) async throws { try await change { $0.document.pause = value };schedule() }
+    func saveSupply(_ value: SupplyValue,count: Double,action: String) async throws {
         guard !state.document.stock.contains(where: { $0.id == action }) else { return }
-        try change { s in s.document.supplies.removeAll { $0.medicationId == value.medicationId };s.document.supplies.append(value)
+        try await change { s in guard !s.document.stock.contains(where: { $0.id == action }) else { return };s.document.supplies.removeAll { $0.medicationId == value.medicationId };s.document.supplies.append(value)
             s.document.stock.append(MovementValue(id: action,medicationId: value.medicationId,kind: "count",timestamp: value.countedAt,units: count))
         };schedule()
     }
-    func restock(_ med: Int64,units: Double,action: String) throws {
+    func updateSupply(_ value: SupplyValue) async throws {
+        guard let previous = state.document.supplies.first(where: { $0.medicationId == value.medicationId }) else { throw AppError.invalid }
+        var next = value;next.countedAt = previous.countedAt
+        try await change { s in s.document.supplies.removeAll { $0.medicationId == next.medicationId };s.document.supplies.append(next) };schedule()
+    }
+    func restock(_ med: Int64,units: Double,action: String) async throws {
         guard units.isFinite && units > 0 else { throw AppError.invalid }
         guard !state.document.stock.contains(where: { $0.id == action }) else { return }
-        try change { $0.document.stock.append(MovementValue(id: action,medicationId: med,kind: "restock",timestamp: millis(),units: units)) };schedule()
+        try await change { s in guard !s.document.stock.contains(where: { $0.id == action }) else { return };s.document.stock.append(MovementValue(id: action,medicationId: med,kind: "restock",timestamp: millis(),units: units)) };schedule()
     }
-    func removeSupply(_ med: Int64) throws { try change { s in s.document.supplies.removeAll { $0.medicationId == med };s.document.stock.removeAll { $0.medicationId == med } };schedule() }
+    func removeSupply(_ med: Int64) async throws { try await change { s in s.document.supplies.removeAll { $0.medicationId == med };s.document.stock.removeAll { $0.medicationId == med } };schedule() }
     func configureWidget(_ med: Med,generic: Bool) throws {
         guard WidgetFiles.directory != nil else { throw AppError.invalid }
         UserDefaults.standard.set(med.id,forKey: "widget.med");UserDefaults.standard.set(med.revision,forKey: "widget.revision");UserDefaults.standard.set(generic,forKey: "widget.generic")
@@ -257,17 +316,18 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
         try? WidgetFiles.publish(snapshot)
     }
     func processWidget() {
+        guard !loading else { return }
         guard !PrivacyController.shared.enabled || PrivacyController.shared.unlocked, let rawToken = WidgetFiles.takePending() else { return }
         if rawToken.hasPrefix("review:") { reviewShortcut(String(rawToken.dropFirst(7)));return }
         let reviewOnly = rawToken.hasPrefix("widget-review:")
         let token = reviewOnly ? String(rawToken.dropFirst(14)) : rawToken
         let prefs = UserDefaults.standard
         guard let med = state.document.medications.first(where: { $0.id == Int64(prefs.integer(forKey: "widget.med")) && $0.active }) else { error = l("Widget changed. Review the medication and amount in the app.");return }
-        guard token == prefs.string(forKey: "widget.token"), med.revision == Int64(prefs.integer(forKey: "widget.revision")), !prefs.bool(forKey: "widget.generic"), !reviewOnly else { widgetReview = med.id;return }
-        attempt { try quick(med,action: "widget:"+token);invalidateWidget() }
+        guard token == prefs.string(forKey: "widget.token"), med.revision == Int64(prefs.integer(forKey: "widget.revision")), !prefs.bool(forKey: "widget.generic"), !PrivacyController.shared.enabled, !reviewOnly else { widgetReview = med.id;return }
+        attempt { [self] in try await self.quick(med,action: "widget:"+token);self.invalidateWidget() }
     }
     func enableSupplyNotifications(_ enabled: Bool) {
-        attempt { try change { $0.supplyNotificationsEnabled = enabled } }
+        attempt { [self] in try await self.change { $0.supplyNotificationsEnabled = enabled } }
         if enabled {
             center.requestAuthorization(options: [.alert,.sound]) { granted,_ in Task { @MainActor in
                 if !granted { self.error = l("Notifications are turned off. Your reminder times are saved.") };self.schedule()
@@ -329,10 +389,10 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
             let content = UNMutableNotificationContent();content.title = l("Supply reminder")
             content.body = l(id.hasPrefix("rx:") ? "Your selected prescription request date has arrived." : "Review your estimated supply in the app.");content.sound = .default
             center.add(UNNotificationRequest(identifier: id,content: content,trigger: UNTimeIntervalNotificationTrigger(timeInterval: max(1,Double(at-stamp)/1000),repeats: false))) { error in
-                if error != nil { Task { @MainActor in self.attempt { try self.change { $0.supplyAlerts?.removeValue(forKey: key) } };self.error = l("Notifications are turned off. Your reminder times are saved.") } }
+                if error != nil { Task { @MainActor in self.attempt { [self] in try await self.change { $0.supplyAlerts?.removeValue(forKey: key) } };self.error = l("Notifications are turned off. Your reminder times are saved.") } }
             }
             alerts[key] = value
         }
-        if alerts != state.supplyAlerts { attempt { try change { $0.supplyAlerts = alerts } } }
+        if alerts != state.supplyAlerts { attempt { [self] in try await self.change { $0.supplyAlerts = alerts } } }
     }
 }

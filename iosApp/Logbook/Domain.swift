@@ -18,7 +18,7 @@ func parseNumber(_ value: String) -> Double? {
     let result = Double(value.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
     return result.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
 }
-enum AppError: Error { case invalid }
+enum AppError: Error { case invalid; case validation(String) }
 let presetTitles = ["METHYLPHENIDATE_IR": "Methylphenidate IR", "CONCERTA": "Methylphenidate ER (Concerta-type)", "LISDEXAMFETAMINE": "Elvanse / Vyvanse", "ATOMOXETINE": "Atomoxetine / Strattera", "CUSTOM": "Custom medication"]
 let presetOrder = ["METHYLPHENIDATE_IR", "CONCERTA", "LISDEXAMFETAMINE", "ATOMOXETINE", "CUSTOM"]
 func model(_ preset: String) -> String? {
@@ -41,7 +41,7 @@ struct OccurrenceValue: Codable, Identifiable {
     var state = "pending"; var nextAlert: Int64; var delivered = false; var followedUp = false; var entryId: Int64?
 }
 struct Document: Codable {
-    var version = 3; var createdAt = millis(); var medications: [Med] = []; var entries: [Entry] = []; var reminders: [ReminderValue] = []
+    var version = 4; var createdAt = millis(); var medications: [Med] = []; var entries: [Entry] = []; var reminders: [ReminderValue] = []
     var preferences: [String: String] = ["onboarded": "false", "haptics": "false"]
     var observations: [ObservationValue] = [];var nonUse: [NonUseValue] = [];var pause = PauseValue();var supplies: [SupplyValue] = [];var stock: [MovementValue] = [];var measurements: [MeasurementValue] = []
     enum CodingKeys: String,CodingKey { case version,createdAt,medications,entries,reminders,preferences,observations,nonUse,pause,supplies,stock,measurements }
@@ -59,7 +59,9 @@ struct Document: Codable {
         stock = try c.decodeIfPresent([MovementValue].self,forKey: .stock) ?? []
     }
     func validated() throws -> Document {
-        let result = try decoded(NativeBridge.shared.canonicalBackup(document: encoded(self)), as: Document.self)
+        let source = try encoded(self)
+        if let issue = NativeBridge.shared.validationIssue(document: source) { throw AppError.validation(issue) }
+        let result = try decoded(NativeBridge.shared.canonicalBackup(document: source), as: Document.self)
         guard result.measurements.allSatisfy({ TimeZone(identifier: $0.zoneId) != nil && fixedOffset($0.offset) != nil }),
               result.entries.allSatisfy({ TimeZone(identifier: $0.zoneId) != nil && fixedOffset($0.offset) != nil }),
               result.observations.allSatisfy({ TimeZone(identifier: $0.zoneId) != nil && fixedOffset($0.offset) != nil && ($0.sleepDate == nil || validDay($0.sleepDate!)) }),

@@ -18,7 +18,7 @@ obj(7,'isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 21
 obj(8,'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ('+','.join(uid(200+i) for i in range(len(files)))+'); runOnlyForDeploymentPostprocessing = 0;')
 obj(9,'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;')
 for n,configs in [(10,[12,13]),(11,[14,15])]: obj(n,'isa = XCConfigurationList; buildConfigurations = ('+','.join(map(uid,configs))+'); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug;')
-for n,name in [(12,'Debug'),(13,'Release')]: obj(n,'isa = XCBuildConfiguration; name = '+name+'; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; };')
+for n,name in [(12,'Debug'),(13,'Release')]: obj(n,'isa = XCBuildConfiguration; name = '+name+'; buildSettings = { '+('SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; ' if name == 'Debug' else '')+'CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; };')
 for n,name,mode in [(14,'Debug','debug'),(15,'Release','release')]:
     settings='''PRODUCT_BUNDLE_IDENTIFIER = com.adhs.logbook.quietsage; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0;
 GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Logbook/Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "ADHS Logbook"; INFOPLIST_KEY_UILaunchScreen_Generation = YES;

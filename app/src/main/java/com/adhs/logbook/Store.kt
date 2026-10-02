@@ -12,13 +12,13 @@ import java.time.ZoneOffset
 
 // Database transactions are the cross-entry-point write boundary, not the ViewModel's busy flag.
 data class LogbookState(
-    val loaded: Boolean = false, val medications: List<Medication> = emptyList(),
+    val loaded: Boolean = false, val loadError: String? = null, val preferences: Map<String,String> = emptyMap(), val medications: List<Medication> = emptyList(),
     val entries: List<DoseEntry> = emptyList(), val reminders: List<Reminder> = emptyList(),
     val remindersEnabled: Boolean = false, val onboarded: Boolean = false,
     val observations: List<Observation> = emptyList(), val nonUse: List<NonUse> = emptyList(),
     val pause: ReminderPause = ReminderPause(), val supplies: List<Supply> = emptyList(), val stock: List<StockMovement> = emptyList(), val measurements: List<Measurement> = emptyList(),
 )
-class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(context, name, null, 4), LogRepository {
+class Store(private val context: Context, private val name: String = "logbook.db") : SQLiteOpenHelper(context, name, null, 4, android.database.DatabaseErrorHandler { throw android.database.sqlite.SQLiteDatabaseCorruptException("Unreadable log; preserve it for recovery") }), LogRepository {
     private val json = BackupFormat.json
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE medication(id INTEGER PRIMARY KEY AUTOINCREMENT, preset TEXT NOT NULL, dose REAL NOT NULL CHECK(dose>0), active INTEGER NOT NULL DEFAULT 1)")
@@ -60,9 +60,10 @@ class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(co
         val reminders = db.rawQuery("SELECT id,hour,minute,details FROM reminder ORDER BY hour,minute", null).use { c -> buildList {
             while(c.moveToNext()) add(if(c.getString(3).isNotEmpty()) json.decodeFromString<Reminder>(c.getString(3)) else Reminder(c.getInt(0),c.getInt(1),c.getInt(2)))
         } }
-        LogbookState(true,meds,entries,reminders,pref("reminders")=="true",pref("onboarded")=="true",readRows<Observation>("observation"),readRows<NonUse>("non_use"),
+        LogbookState(true,null,readPreferences(),meds,entries,reminders,pref("reminders")=="true",pref("onboarded")=="true",readRows<Observation>("observation"),readRows<NonUse>("non_use"),
             pref("pause")?.let { json.decodeFromString<ReminderPause>(it) } ?: ReminderPause(),readRows<Supply>("supply"),readRows<StockMovement>("stock"),readRows<Measurement>("measurement"))
     }
+    private fun readPreferences(): Map<String,String> = readableDatabase.rawQuery("SELECT key,value FROM preference",null).use { c -> buildMap { while(c.moveToNext()) put(c.getString(0),c.getString(1)) } }
     fun pref(key: String): String? = readableDatabase.rawQuery("SELECT value FROM preference WHERE key=?",arrayOf(key)).use { if(it.moveToFirst()) it.getString(0) else null }
     fun setPref(key: String, value: String) { check(writableDatabase.insertWithOnConflict("preference",null,ContentValues().apply { put("key",key);put("value",value) },SQLiteDatabase.CONFLICT_REPLACE)!=-1L) }
     fun saveMedication(id: Long?, preset: Preset, dose: Double) = saveMedication(Medication(id ?: 0,preset,dose))
@@ -84,7 +85,7 @@ class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(co
         require(entry.notes.length <= 5000 && entry.medicationName.isNotBlank() && entry.unit in doseUnits)
         ZoneId.of(entry.zoneId); ZoneOffset.of(entry.offset)
         require(snapshot().medications.any { it.id == entry.medicationId })
-        require(snapshot().nonUse.none { it.medicationId==entry.medicationId && entry.timestamp in it.start..it.end }) { "A non-use record overlaps this dose. Correct one record first." }
+        validateField(snapshot().nonUse.none { it.medicationId==entry.medicationId && it.contains(entry.timestamp) },"A non-use record overlaps this dose. Correct one record first.")
         val values=ContentValues().apply {
             put("medication_id",entry.medicationId);put("preset",entry.preset.name);put("dose",entry.doseMg);put("timestamp",entry.timestamp)
             put("zone",entry.zoneId);put("offset",entry.offset);if(entry.mood==null) putNull("mood") else put("mood",entry.mood);put("notes",entry.notes)
@@ -92,7 +93,13 @@ class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(co
         val id=if(entry.id==0L) writableDatabase.insertOrThrow("entry",null,values) else entry.id.also {
             check(writableDatabase.update("entry",values,"id=?",arrayOf(it.toString()))==1)
         }
-        writableDatabase.execSQL("UPDATE entry SET details=? WHERE id=?",arrayOf<Any>(json.encodeToString(entry.copy(id=id)),id)); syncLedger(); id
+        writableDatabase.execSQL("UPDATE entry SET details=? WHERE id=?",arrayOf<Any>(json.encodeToString(entry.copy(id=id)),id))
+        val reminders=snapshot().reminders
+        occurrences().filter { it.entryId==id }.forEach { occurrence ->
+            val linkedMed=reminders.find { it.id==occurrence.reminderId }?.medicationId
+            if(linkedMed!=null && linkedMed!=entry.medicationId) putOccurrence(occurrence.copy(state="undone",entryId=null))
+        }
+        syncLedger(); id
     }
     override fun commit(entry: DoseEntry, actionId: String): Long = transaction {
         require(actionId.isNotBlank() && actionId.length <= 200)
@@ -114,6 +121,7 @@ class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(co
     }
     fun saveReminder(reminder: Reminder) = transaction {
         require(reminder.hour in 0..23 && reminder.minute in 0..59 && reminder.cutoffMinutes in 30..240)
+        validateField(snapshot().reminders.none { it.id!=reminder.id && it.hour==reminder.hour && it.minute==reminder.minute },"A reminder already exists at this time. Edit it instead.")
         val previous=snapshot().reminders.find { it.id==reminder.id }
         val values=ContentValues().apply { put("hour",reminder.hour);put("minute",reminder.minute) }
         val id=if(reminder.id==0) writableDatabase.insertOrThrow("reminder",null,values).toInt() else reminder.id.also {
@@ -139,9 +147,17 @@ class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(co
     }
     fun restore(doc: BackupDocument) {
         validateRestore(doc)
+        val recovery=try { BackupFormat.encode(backup()) } catch(error: Exception) {
+            // Preserve unreadable bytes before rebuilding; never silently discard a damaged log.
+            close()
+            val original=context.getDatabasePath(name)
+            val folder=java.io.File(context.noBackupFilesDir,"unreadable-"+java.util.UUID.randomUUID())
+            check(folder.mkdirs())
+            listOf(original,java.io.File(original.path+"-wal"),java.io.File(original.path+"-shm"),java.io.File(original.path+"-journal")).filter { it.exists() }.forEach { it.copyTo(java.io.File(folder,it.name)) }
+            check(context.deleteDatabase(name))
+            null
+        }
         transaction {
-            // Recovery snapshot is private database data, covered by the same OS backup exclusion.
-            val recovery=BackupFormat.encode(backup())
             listOf("entry","medication","reminder","occurrence","action","preference","observation","non_use","supply","stock","measurement").forEach { writableDatabase.delete(it,null,null) }
             doc.medications.forEach { m -> writableDatabase.insertOrThrow("medication",null,ContentValues().apply {
                 put("id",m.id);put("preset",m.preset.name);put("dose",m.usualDose);put("active",if(m.active) 1 else 0);put("details",json.encodeToString(m))
@@ -155,7 +171,7 @@ class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(co
             }) }
             writeShould(SupplyLedger.reconcile(doc))
             doc.preferences.forEach { (k,v) -> setPref(k,v) }
-            setPref("supply_enabled","false");setPref("reminders","false");setPref("recovery",recovery)
+            setPref("supply_enabled","false");setPref("reminders","false");if(recovery!=null) setPref("recovery",recovery)
         }
     }
 
@@ -209,6 +225,11 @@ class Store(context: Context, name: String = "logbook.db") : SQLiteOpenHelper(co
         val doc=backup();if(doc.stock.any { it.id==actionId }) return@transaction
         val next=SupplyLedger.reconcile(doc.copy(supplies=doc.supplies.filterNot { it.medicationId==value.medicationId }+value,
             stock=doc.stock+StockMovement(actionId,value.medicationId,"count",value.countedAt,counted)))
+        validateRestore(next);writeShould(next)
+    }
+    fun updateSupply(value: Supply) = transaction {
+        val doc=backup();val previous=doc.supplies.first { it.medicationId==value.medicationId }
+        val next=SupplyLedger.reconcile(doc.copy(supplies=doc.supplies.filterNot { it.medicationId==value.medicationId }+value.copy(countedAt=previous.countedAt)))
         validateRestore(next);writeShould(next)
     }
     fun restock(medicationId: Long,units: Double,actionId: String,now: Long=System.currentTimeMillis()) = transaction {

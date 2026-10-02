@@ -10,7 +10,29 @@ val observationCategories = listOf("focus", "mood", "appetite", "sleep", "sympto
 val observationResponses = listOf("rated", "none", "unsure", "recorded")
 @Serializable
 data class NonUse(val id: String, val medicationId: Long, val start: Long, val end: Long,
-    val createdAt: Long, val zoneId: String, val offset: String, val notes: String = "", val occurrenceId: String? = null)
+    val createdAt: Long, val zoneId: String, val offset: String, val notes: String = "", val occurrenceId: String? = null, val kind: String = "legacy") {
+    fun contains(time: Long): Boolean = kind != "scheduled" && time >= start && if(kind=="legacy") time<=end else time<end
+    fun intersects(a: Long,b: Long): Boolean = start<b && if(kind in listOf("day","period")) end>a else end>=a
+}
+class ValidationException(message: String): IllegalArgumentException(message)
+fun validateField(valid: Boolean,message: String) { if(!valid) throw ValidationException(message) }
+fun nonUseName(kind: String) = when(kind) {
+    "scheduled" -> "Scheduled dose not taken"
+    "day" -> "No doses taken on this day"
+    "period" -> "No doses taken during this period"
+    else -> "Not taken (original record)"
+}
+val sleepQualityLabels = listOf("Very poor","Poor","Fair","Good","Very good")
+fun ratingDescription(category: String,version: Int): String = when {
+    category=="sleep" && version==2 -> "Sleep quality: 0 = very poor · 4 = very good"
+    category=="sleep" -> "Original sleep scale: 0 = very low · 4 = very high"
+    category=="focus" -> "Everyday functioning: 0 = very low · 4 = very high"
+    category=="mood" -> "Mood: 0 = very low · 4 = very high"
+    category=="appetite" -> "Appetite: 0 = very low · 4 = very high"
+    category=="symptom" -> "Symptom intensity: 0 = very low · 4 = very high"
+    category=="benefit" -> "Noticed benefit: 0 = very low · 4 = very high"
+    else -> "Noticed fading: 0 = very low · 4 = very high"
+}
 @Serializable
 data class ReminderPause(val paused: Boolean = false, val until: Long? = null) {
     fun active(now: Long): Boolean = paused && (until == null || now < until)
@@ -56,7 +78,7 @@ object ShouldValidation {
         require(d.observations.size <= 100000 && d.nonUse.size <= 100000 && d.stock.size <= 200000)
         require(d.observations.map { it.id }.toSet().size==d.observations.size && d.nonUse.map { it.id }.toSet().size==d.nonUse.size)
         d.observations.forEach {
-            require(it.id.isNotBlank() && it.id.length<=100 && it.category in observationCategories && it.response in observationResponses && it.scaleVersion==1)
+            require(it.id.isNotBlank() && it.id.length<=100 && it.category in observationCategories && it.response in observationResponses && (it.scaleVersion==1 || it.category=="sleep" && it.scaleVersion==2))
             require(time(it.timestamp) && time(it.createdAt) && it.notes.length<=5000 && it.zoneId.length<=100 && it.offset.length<=10)
             require(if(it.response=="rated") it.value in 0..4 else it.value==null)
             require(it.doseId==null || it.doseId in entries)
@@ -66,9 +88,13 @@ object ShouldValidation {
         d.nonUse.forEach { n ->
             require(n.id.isNotBlank() && n.id.length<=100 && n.medicationId in meds && time(n.start) && time(n.end) && n.end>=n.start && time(n.createdAt))
             require(n.notes.length<=5000 && n.zoneId.length<=100 && n.offset.length<=10 && (n.occurrenceId?.length ?: 0)<=100)
-            require(d.entries.none { it.medicationId==n.medicationId && it.timestamp in n.start..n.end }) { "A dose is recorded in this non-use period. Correct one record first." }
+            require(n.kind in listOf("legacy","scheduled","day","period"))
+            require(if(n.kind=="scheduled") n.occurrenceId!=null && n.start==n.end else n.kind=="legacy" || n.end>n.start)
+            validateField(d.entries.none { it.medicationId==n.medicationId && n.contains(it.timestamp) },"A dose is recorded in this non-use period. Correct one record first.")
         }
-        d.nonUse.groupBy { it.medicationId }.values.forEach { records -> records.sortedBy { it.start }.zipWithNext().forEach { (a,b) -> require(a.end<b.start) { "Non-use periods overlap." } } }
+        d.nonUse.filter { it.kind!="scheduled" }.groupBy { it.medicationId }.values.forEach { records -> records.sortedBy { it.start }.zipWithNext().forEach { (a,b) ->
+            validateField(if(a.kind=="legacy") a.end<b.start else a.end<=b.start,"Non-use periods overlap. Edit the existing record first.")
+        } }
         require(d.pause.until==null || time(d.pause.until))
         require(d.supplies.map { it.medicationId }.toSet().size==d.supplies.size)
         d.supplies.forEach { s ->
@@ -101,13 +127,13 @@ object SummaryBuilder {
         val start=boundaries.first();val end=boundaries.last()
         val doses=doc.entries.filter { it.timestamp>=start && it.timestamp<end }
         val observations=doc.observations.filter { it.timestamp>=start && it.timestamp<end }
-        val nonUse=doc.nonUse.filter { it.start<end && it.end>=start }
+        val nonUse=doc.nonUse.filter { it.intersects(start,end) }
         val measureDays=mutableSetOf<Int>();val doseDays=mutableSetOf<Int>();val obsDays=mutableSetOf<Int>();val nonDays=mutableSetOf<Int>()
         boundaries.zipWithNext().forEachIndexed { i,(a,b) ->
             if(doc.measurements.any { it.timestamp>=a && it.timestamp<b }) measureDays+=i
             if(doses.any { it.timestamp>=a && it.timestamp<b }) doseDays+=i
             if(observations.any { it.timestamp>=a && it.timestamp<b }) obsDays+=i
-            if(nonUse.any { it.start<b && it.end>=a }) nonDays+=i
+            if(nonUse.any { it.intersects(a,b) }) nonDays+=i
         }
         return ReportSummary(boundaries.size-1,doses.size,doseDays.size,obsDays.size,nonDays.size,
             boundaries.size-1-(doseDays+obsDays+nonDays+measureDays).size,

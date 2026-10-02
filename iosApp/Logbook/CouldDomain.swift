@@ -10,7 +10,7 @@ func measurementText(_ m: MeasurementValue) -> String { l(measurementName(m.kind
 func blankMeasurement() -> MeasurementValue { let now = millis();return MeasurementValue(kind: "pressure",value: 0,unit: "mmHg",timestamp: now,createdAt: now,zoneId: TimeZone.current.identifier,offset: zoneOffset(date(now))) }
 struct QuickConfigurationValue: Codable { var token: String;var medicationId: Int64;var revision: Int64 }
 struct ReviewRouteValue: Codable { var medicationId: Int64?;var unavailable: Bool;var changed: Bool }
-struct DistributionValue: Codable { var category: String;var response: String;var value: Int?;var count: Int }
+struct DistributionValue: Codable { var category: String;var response: String;var value: Int?;var count: Int;var scaleVersion: Int? }
 struct MoodCountValue: Codable { var value: Int;var count: Int }
 struct WeekDayValue: Codable { var start: Int64;var doses: [Entry];var observations: [ObservationValue];var nonUse: [NonUseValue];var measurements: [MeasurementValue] }
 struct WeeklyValue: Codable { var summary: SummaryValue;var days: [WeekDayValue];var distributions: [DistributionValue];var legacyMoods: [MoodCountValue] }

@@ -16,9 +16,9 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LoggingFlowTest {
     @get:Rule val ui=createAndroidComposeRule<MainActivity>()
-    @Before fun removeOnlyPreviousTestFixtures() {
+    @Before fun resetTestLog() {
         Store(ui.activity).use { store ->
-            store.snapshot().entries.filter { it.notes in listOf("Instrumentation test note","Edited instrumentation note") }.forEach { store.deleteEntry(it.id) }
+            store.restore(com.adhs.logbook.shared.BackupDocument(createdAt=0,medications=emptyList(),entries=emptyList(),reminders=emptyList()))
         }
         ui.activityRule.scenario.recreate()
     }
@@ -29,12 +29,12 @@ class LoggingFlowTest {
             ui.onNodeWithText("Your usual dose (mg)").performTextInput("10")
             ui.onNodeWithText("Start",useUnmergedTree=true).performScrollTo().performClick()
         }
-        ui.waitUntil(10_000) { ui.onAllNodesWithText("＋ Log dose").fetchSemanticsNodes().isNotEmpty() }
+        ui.waitUntil(10_000) { ui.onAllNodesWithText("Edit amount or time").fetchSemanticsNodes().isNotEmpty() }
     }
     @Test fun quickLogAndUndo() {
         openHome()
         val before=Store(ui.activity).use { it.snapshot().entries.size }
-        ui.onNodeWithText("Log now · 10 mg").performClick()
+        ui.onNodeWithText("Record 10 mg now").performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithText("Dose logged").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithText("Undo").performClick()
         ui.waitUntil(10_000) { Store(ui.activity).use { it.snapshot().entries.size==before } }
@@ -53,14 +53,14 @@ class LoggingFlowTest {
             shell("settings put system font_scale 1.5")
             night.setApplicationNightMode(android.app.UiModeManager.MODE_NIGHT_YES)
             localeManager.applicationLocales=android.os.LocaleList.forLanguageTags("de")
-            ui.waitUntil(20_000) { ui.onAllNodesWithText("＋ Dosis erfassen").fetchSemanticsNodes().isNotEmpty() }
-            ui.onNodeWithText("＋ Dosis erfassen").assertIsDisplayed().performClick()
+            ui.waitUntil(20_000) { ui.onAllNodesWithText("Menge oder Zeitpunkt bearbeiten").fetchSemanticsNodes().isNotEmpty() }
+            ui.onNodeWithText("Menge oder Zeitpunkt bearbeiten").assertIsDisplayed().performClick()
             ui.onNodeWithText("Dosis speichern").performScrollTo().assertIsDisplayed().performClick()
             ui.waitUntil(10_000) { ui.onAllNodesWithText("Zuletzt erfasst").fetchSemanticsNodes().isNotEmpty() }
             val output=ui.activity.filesDir
             File(output,"must-de-dark-large.png").outputStream().use { ui.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG,100,it) }
             ui.onNodeWithText("Export").performClick()
-            ui.onNodeWithText("Bericht exportieren").performScrollTo().assertIsDisplayed()
+            ui.onNodeWithText("Bericht erstellen").performScrollTo().assertIsDisplayed()
         } finally {
             Store(ui.activity).use { store -> store.snapshot().entries.filter { it.id !in originalIds }.forEach { store.deleteEntry(it.id) } }
             localeManager.applicationLocales=oldLocales
@@ -70,7 +70,7 @@ class LoggingFlowTest {
     }
     @Test fun setupLogEditAndDelete() {
         openHome()
-        ui.onNodeWithText("＋ Log dose").performClick()
+        ui.onNodeWithText("Edit amount or time").performClick()
         ui.onNodeWithText("Notes (optional)").performTextInput("Instrumentation test note")
         ui.activityRule.scenario.recreate()
         ui.waitUntil(10_000) { ui.onAllNodesWithText("Instrumentation test note").fetchSemanticsNodes().isNotEmpty() }
@@ -113,6 +113,7 @@ class LoggingFlowTest {
             org.junit.Assert.assertEquals("none",record.response);org.junit.Assert.assertNull(record.value)
             store.deleteObservation(record.id)
         }
+        ui.onNodeWithText("Back").performClick()
         ui.onNodeWithText("Export").performClick()
         ui.onNodeWithText("Summary with details").performScrollTo().assertExists()
         ui.onNodeWithText("Include free-text notes").performScrollTo().assertExists()
@@ -135,6 +136,7 @@ class LoggingFlowTest {
                 org.junit.Assert.assertEquals(before,store.snapshot().entries.size)
                 org.junit.Assert.assertEquals(80.0,store.snapshot().measurements.first { it.notes=="Could measurement fixture" }.diastolic!!,0.0)
             }
+            ui.onNodeWithText("Back").performClick()
             ui.onNode(hasText("History") and hasClickAction()).performClick()
             ui.onNodeWithText("Weekly overview").performClick()
             ui.onNodeWithText("Choose week").assertExists()
@@ -155,4 +157,18 @@ class LoggingFlowTest {
         }
     }
 
+    @Test fun medicationFreeOnboardingAndNestedObservationDraft() {
+        ui.waitUntil(10_000) { ui.onAllNodesWithText("Start without medication").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithText("Start without medication").performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithText("Add observation").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithText("Add observation").performClick()
+        ui.onAllNodesWithText("Response").onLast().performClick();ui.onNodeWithText("None").performClick()
+        ui.onNodeWithText("Notes (optional)").performScrollTo().performTextInput("Preserved draft")
+        ui.onNodeWithText("Add measurement").performScrollTo().performClick()
+        ui.onNodeWithText("Back").performClick();ui.onNodeWithText("Discard").performClick()
+        ui.onNodeWithText("Preserved draft").performScrollTo().assertExists()
+        ui.onNodeWithText("Save").performScrollTo().performClick()
+        ui.waitUntil(10_000) { Store(ui.activity).use { it.snapshot().observations.any { o->o.notes=="Preserved draft" } } }
+        Store(ui.activity).use { org.junit.Assert.assertTrue(it.snapshot().medications.isEmpty());org.junit.Assert.assertTrue(it.snapshot().entries.isEmpty()) }
+    }
 }

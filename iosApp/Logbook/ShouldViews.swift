@@ -19,7 +19,7 @@ struct ObservationList: View {
             }
             Section(l("Not taken")) {
                 ForEach(store.state.document.nonUse.sorted { $0.start > $1.start }) { record in
-                    Button { nonUse = record } label: { VStack(alignment: .leading) { Text(store.state.document.medications.first { $0.id == record.medicationId }?.name ?? "");Text(date(record.start),format: .dateTime.day().month().year().hour().minute()).font(.caption) } }
+                    Button { nonUse = record } label: { VStack(alignment: .leading) { Text(l(nonUseName(record.recordKind))+" · "+(store.state.document.medications.first { $0.id == record.medicationId }?.name ?? ""));Text(date(record.start),format: .dateTime.day().month().year().hour().minute()).font(.caption) } }
                 }
             }
         }.navigationTitle(l("Observations"))
@@ -29,14 +29,17 @@ struct ObservationList: View {
     }
 }
 func blankObservation() -> ObservationValue { ObservationValue(category: "focus",response: "",timestamp: millis(),createdAt: millis(),zoneId: TimeZone.current.identifier,offset: zoneOffset(Date())) }
-func blankNonUse() -> NonUseValue { let now = millis();return NonUseValue(medicationId: 0,start: now,end: now,createdAt: now,zoneId: TimeZone.current.identifier,offset: zoneOffset(date(now))) }
+func blankNonUse() -> NonUseValue { let day = Calendar.current.startOfDay(for: Calendar.current.date(byAdding: .day,value: -1,to: Date())!);return NonUseValue(medicationId: 0,start: millis(day),end: millis(Calendar.current.date(byAdding: .day,value: 1,to: day)!),createdAt: millis(),zoneId: TimeZone.current.identifier,offset: zoneOffset(day),kind: "day") }
+private let dayFormatter: DateFormatter = { let f = DateFormatter();f.locale = Locale(identifier: "en_US_POSIX");f.dateFormat = "yyyy-MM-dd";return f }()
 struct ObservationForm: View {
     @EnvironmentObject var store: LogbookStore
+    @State private var discarding = false
     @Environment(\.dismiss) var dismiss
     @State var measurement: MeasurementValue?
     @State var value: ObservationValue
     @State var time = Date()
     @State var sleepDate = ""
+    @State private var initialized = false
     @State var deleting = false
     var existing: Bool { store.state.document.observations.contains { $0.id == value.id } }
     var body: some View {
@@ -44,18 +47,18 @@ struct ObservationForm: View {
             Form {
                 if store.state.document.preferences["measurements_enabled"] == "true" { Button(l("Add measurement")) { measurement = blankMeasurement() } }
                 Picker(l("Category"),selection: $value.category) { ForEach(observationTypes,id: \.self) { Text(l(categoryName($0))).tag($0) } }
-                    .onChange(of: value.category) { _ in value.response = "";value.value = nil }
+                    .onChange(of: value.category) { _ in value.response = "";value.value = nil;value.scaleVersion = value.category == "sleep" ? 2 : 1 }
                 Picker(l("Response"),selection: $value.response) {
                     Text(l("Choose a response")).tag("");ForEach(observationResponses,id: \.self) { Text(l(responseName($0))).tag($0) }
                 }
                 if value.response == "rated" {
-                    Text(l("0 = very low · 4 = very high"))
+                    Text(l(ratingDescription(value.category,value.scaleVersion)))
                     Picker(l("Rating"),selection: Binding(get: { value.value ?? -1 },set: { value.value = $0 })) {
-                        Text(l("Choose a response")).tag(-1);ForEach(0..<5,id: \.self) { Text(String($0)).tag($0) }
+                        Text(l("Choose a response")).tag(-1);ForEach(0..<5,id: \.self) { Text(value.category == "sleep" && value.scaleVersion == 2 ? "\($0): \(l(sleepQualityLabels[$0]))" : String($0)).tag($0) }
                     }
                 }
                 DatePicker(l("Observation time"),selection: $time,in: ...Date())
-                if value.category == "sleep" { TextField(l("Night starting on (YYYY-MM-DD)"),text: $sleepDate) }
+                if value.category == "sleep" { DatePicker(l("Night starting on"),selection: Binding(get: { dayFormatter.date(from: sleepDate) ?? Date() },set: { sleepDate = dayFormatter.string(from: $0) }),in: ...Date(),displayedComponents: .date) }
                 Picker(l("Optional dose link"),selection: Binding(get: { value.doseId ?? 0 },set: { value.doseId = $0 == 0 ? nil : $0 })) {
                     Text(l("No dose link")).tag(Int64(0));ForEach(store.state.document.entries) { Text($0.medicationName+" · "+date($0.timestamp).formatted(date: .abbreviated,time: .shortened)).tag($0.id) }
                 }
@@ -64,47 +67,55 @@ struct ObservationForm: View {
                 if existing { Button(l("Delete record"),role: .destructive) { deleting = true } }
             }.navigationTitle(l(existing ? "Edit observation" : "Add observation"))
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) { Button(l("Save")) {
+                    ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { discarding = true } }
+                    ToolbarItem(placement: .confirmationAction) { Button(l("Save")) { guard !store.busy else { return };
                         if value.timestamp != millis(time) { value.zoneId = TimeZone.current.identifier;value.offset = zoneOffset(time) };value.timestamp = millis(time)
                         if value.response != "rated" { value.value = nil };value.sleepDate = value.category == "sleep" ? sleepDate : nil
-                        store.attempt { try store.saveObservation(value);dismiss() }
+                        store.attempt { try await store.saveObservation(value);dismiss() }
                     }.disabled(value.response.isEmpty || value.notes.count > 5000 || (value.response == "rated" && (value.value ?? -1) < 0) || (value.category == "sleep" && !validDay(sleepDate))) }
                 }
-                .confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try store.deleteObservation(value.id);dismiss() } } }
-        }.sheet(item: $measurement) { MeasurementForm(original: $0) }.onAppear { time = date(value.timestamp);let f = DateFormatter();f.dateFormat = "yyyy-MM-dd";sleepDate = value.sleepDate ?? f.string(from: Calendar.current.date(byAdding: .day,value: -1,to: Date())!) }
+                .confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try await store.deleteObservation(value.id);dismiss() } } }
+        }.disabled(store.busy).interactiveDismissDisabled()
+        .confirmationDialog(l("Discard changes?"),isPresented: $discarding,titleVisibility: .visible) { Button(l("Discard"),role: .destructive) { dismiss() };Button(l("Keep editing"),role: .cancel) {} }
+        .sheet(item: $measurement) { MeasurementForm(original: $0) }.onAppear { guard !initialized else { return };initialized = true;time = date(value.timestamp);let f = DateFormatter();f.dateFormat = "yyyy-MM-dd";sleepDate = value.sleepDate ?? f.string(from: Calendar.current.date(byAdding: .day,value: -1,to: Date())!) }
     }
 }
 struct NonUseForm: View {
     @EnvironmentObject var store: LogbookStore
+    @State private var discarding = false
     @Environment(\.dismiss) var dismiss
     @State var value: NonUseValue
     @State var start = Date()
     @State var end = Date()
-    @State var period = false
     @State var deleting = false
     var existing: Bool { store.state.document.nonUse.contains { $0.id == value.id } }
-    var overlaps: Bool { store.state.document.entries.contains { $0.medicationId == value.medicationId && $0.timestamp >= millis(start) && $0.timestamp <= millis(period ? end : start) } }
+    var from: Date { value.recordKind == "day" ? Calendar.current.startOfDay(for: start) : start }
+    var until: Date { value.recordKind == "day" ? Calendar.current.date(byAdding: .day,value: 1,to: from)! : value.recordKind == "scheduled" ? start : end }
+    var overlaps: Bool { var candidate = value;candidate.start = millis(from);candidate.end = millis(until);return store.state.document.entries.contains { $0.medicationId == value.medicationId && candidate.contains($0.timestamp) } }
     var body: some View {
         NavigationStack {
             Form {
                 Text(l("Only record what you know. Pausing reminders does not record non-use."))
                 Picker(l("Medication"),selection: $value.medicationId) { Text(l("Choose medication")).tag(Int64(0));ForEach(store.state.document.medications) { Text($0.name).tag($0.id) } }
-                DatePicker(l("Start"),selection: $start,in: ...Date())
-                Toggle(l("Record a period"),isOn: $period)
-                if period { DatePicker(l("End"),selection: $end,in: ...Date()) }
+                if !existing && value.occurrenceId == nil { Picker(l("Record type"),selection: Binding(get: { value.recordKind },set: { value.kind = $0 })) { Text(l(nonUseName("day"))).tag("day");Text(l(nonUseName("period"))).tag("period") } }
+                else { Text(l(nonUseName(value.recordKind))) }
+                if value.recordKind == "day" { Text(l("Choose a completed day. For today, record a period ending now."));DatePicker(l("Choose day"),selection: $start,in: ...Calendar.current.date(byAdding: .day,value: -1,to: Date())!,displayedComponents: .date) }
+                else if value.recordKind == "scheduled" { Text(start.formatted()) }
+                else { DatePicker(l("Start"),selection: $start,in: ...Date());DatePicker(l("End"),selection: $end,in: ...Date()) }
                 TextField(l("Notes (optional)"),text: $value.notes,axis: .vertical).lineLimit(2...8)
                 if overlaps { Text(l("A dose is recorded in this non-use period. Correct one record first.")) }
                 if existing { Button(l("Delete record"),role: .destructive) { deleting = true } }
             }.navigationTitle(l("Record not taken"))
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) { Button(l("Save")) {
-                        if value.start != millis(start) { value.zoneId = TimeZone.current.identifier;value.offset = zoneOffset(start) };value.start = millis(start);value.end = millis(period ? end : start)
-                        store.attempt { try store.saveNonUse(value);dismiss() }
-                    }.disabled(value.medicationId == 0 || overlaps || (period && end < start) || value.notes.count > 5000) }
-                }.confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try store.deleteNonUse(value.id);dismiss() } } }
-        }.onAppear { start = date(value.start);end = date(value.end);period = value.end > value.start }
+                    ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { discarding = true } }
+                    ToolbarItem(placement: .confirmationAction) { Button(l("Save")) { guard !store.busy else { return };
+                        if value.start != millis(from) { value.zoneId = TimeZone.current.identifier;value.offset = zoneOffset(from) };value.start = millis(from);value.end = millis(until)
+                        store.attempt { try await store.saveNonUse(value);dismiss() }
+                    }.disabled(value.medicationId == 0 || overlaps || (until < from || until > Date() || value.recordKind == "period" && until == from) || value.notes.count > 5000) }
+                }.confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try await store.deleteNonUse(value.id);dismiss() } } }
+        }.disabled(store.busy).interactiveDismissDisabled()
+        .confirmationDialog(l("Discard changes?"),isPresented: $discarding,titleVisibility: .visible) { Button(l("Discard"),role: .destructive) { dismiss() };Button(l("Keep editing"),role: .cancel) {} }
+        .onAppear { start = date(value.start);end = date(value.end) }
     }
 }
 struct PauseForm: View {
@@ -117,7 +128,7 @@ struct PauseForm: View {
             Toggle(l("Pause reminders"),isOn: $paused)
             Text(l("This pauses notifications only. It does not record medication use or non-use."))
             if paused { Toggle(l("Resume at a chosen time"),isOn: $timed);if timed { DatePicker(l("Resume at"),selection: $until,in: Date()...) } }
-            Button(l("Save")) { store.attempt { try store.pause(PauseValue(paused: paused,until: paused && timed ? millis(until) : nil)) } }
+            Button(l("Save")) { guard !store.busy else { return }; store.attempt { try await store.pause(PauseValue(paused: paused,until: paused && timed ? millis(until) : nil)) } }
         }.navigationTitle(l("Pause reminders"))
             .onAppear { paused = store.state.document.pause.active();timed = store.state.document.pause.until != nil;if let end = store.state.document.pause.until { until = date(end) } }
     }
@@ -139,6 +150,7 @@ struct SupplyForm: View {
     var body: some View {
         Form {
             Toggle(l("Supply notifications"),isOn: Binding(get: { store.state.supplyNotificationsEnabled == true },set: { store.enableSupplyNotifications($0) }))
+            if store.state.supplyNotificationsEnabled == true && store.notificationsAllowed == false { Text(l("Notifications are off in system settings. Enable them to receive supply alerts.")) }
             Text(l("After restore, notifications stay off until you enable them here.")).font(.footnote)
             Picker(l("Medication"),selection: $medId) { Text(l("Choose medication")).tag(Int64(0));ForEach(store.state.document.medications.filter(\.active)) { Text($0.name).tag($0.id) } }
                 .onChange(of: medId) { _ in unit = existing?.unitLabel ?? "";count = "";threshold = existing.map { number($0.lowThreshold) } ?? "";mapping = existing?.dosePerUnit.map(number) ?? "";rx = existing?.prescriptionDate != nil;rxDate = existing?.prescriptionDate.map(date) ?? Date().addingTimeInterval(7*86400);action = UUID().uuidString }
@@ -147,7 +159,7 @@ struct SupplyForm: View {
                     Text(l("Estimated remaining: %s %s",number(balance.remaining),supply.unitLabel))
                     if balance.inconsistent { Text(l("Count may be incomplete. Review uncounted logs or recount.")) }
                     TextField(l("Restock units"),text: $restock).keyboardType(.decimalPad)
-                    Button(l("Add restock")) { store.attempt { try store.restock(medId,units: parseNumber(restock)!,action: action);restock = "";action = UUID().uuidString } }.disabled(parseNumber(restock) == nil)
+                    Button(l("Add restock")) { guard !store.busy,let amount = parseNumber(restock) else { return };let token = action,med = medId;store.attempt { try await store.restock(med,units: amount,action: token);restock = "";action = UUID().uuidString } }.disabled(store.busy || parseNumber(restock) == nil)
                 }
                 Text(l("Use a physical count. Package units are separate from the logged dose."))
                 TextField(l("Package unit label"),text: $unit)
@@ -157,14 +169,19 @@ struct SupplyForm: View {
                 Text(l("Mapping uses the medication's logging unit. Leave blank to record stock units explicitly in each dose. No conversion is inferred.")).font(.footnote)
                 Toggle(l("Prescription request reminder"),isOn: $rx)
                 if rx { DatePicker(l("Prescription request date"),selection: $rxDate,displayedComponents: [.date,.hourAndMinute]) }
-                Button(l("Save count and settings")) { if let med = store.state.document.medications.first(where: { $0.id == medId }) {
+                if let previous = existing { Button(l("Save settings without recounting")) {
+                    var next = previous;next.unitLabel = unit.trimmingCharacters(in: .whitespacesAndNewlines);next.lowThreshold = nonnegative(threshold)!;next.dosePerUnit = parseNumber(mapping);next.prescriptionDate = rx ? millis(rxDate) : nil;next.revision += 1
+                    store.attempt { try await store.updateSupply(next) }
+                }.disabled(unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || unit.count > 80 || nonnegative(threshold) == nil || (!mapping.isEmpty && parseNumber(mapping) == nil)) }
+                Button(l("Save count and settings")) { guard !store.busy,let amount = nonnegative(count) else { return };let token = action;if let med = store.state.document.medications.first(where: { $0.id == medId }) {
                     let value = SupplyValue(medicationId: med.id,unitLabel: unit,countedAt: millis(),lowThreshold: nonnegative(threshold)!,dosePerUnit: parseNumber(mapping),doseUnit: med.unit,prescriptionDate: rx ? millis(rxDate) : nil,revision: (existing?.revision ?? 0)+1)
-                    store.attempt { try store.saveSupply(value,count: nonnegative(count)!,action: action);count = "";action = UUID().uuidString }
+                    store.attempt { try await store.saveSupply(value,count: amount,action: token);count = "";action = UUID().uuidString }
                 } }.disabled(unit.trimmingCharacters(in: .whitespaces).isEmpty || unit.count > 80 || nonnegative(count) == nil || nonnegative(threshold) == nil || (!mapping.isEmpty && parseNumber(mapping) == nil))
                 if existing != nil { Button(l("Delete record"),role: .destructive) { deleting = true } }
             }
         }.navigationTitle(l("Supply"))
-            .confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try store.removeSupply(medId) } } }
+            .onAppear { unit = existing?.unitLabel ?? "";threshold = existing.map { number($0.lowThreshold) } ?? "";mapping = existing?.dosePerUnit.map(number) ?? "";rx = existing?.prescriptionDate != nil;rxDate = existing?.prescriptionDate.map(date) ?? Date().addingTimeInterval(7*86400) }
+            .confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try await store.removeSupply(medId) } } }
     }
 }
 struct WidgetSettings: View {

@@ -23,7 +23,7 @@ class CouldFeaturesTest {
         assertEquals(original,store.snapshot().measurements.single())
         store.saveMeasurement(original.copy(value=151.25));assertEquals(151.25,store.snapshot().measurements.single().value,0.0)
         val backup=BackupCrypto.decrypt(BackupCrypto.encrypt(store.backup(),"could passphrase".toCharArray()),"could passphrase".toCharArray())
-        assertEquals(3,backup.version)
+        assertEquals(4,backup.version)
         assertThrows(Exception::class.java) { store.restore(backup.copy(measurements=listOf(original.copy(value=Double.POSITIVE_INFINITY)))) }
         assertEquals(151.25,store.snapshot().measurements.single().value,0.0)
         store.deleteMeasurement(original.id);assertTrue(store.snapshot().measurements.isEmpty());store.restore(backup)
@@ -74,4 +74,47 @@ class CouldFeaturesTest {
         assertEquals("lb",doc.measurements.single().unit);assertEquals(1720000060000L,doc.measurements.single().createdAt)
     }
 
+    @Test fun schemaFourSleepAndCompletedDstDayRoundTrip() = database { store,_ ->
+        val med=store.saveMedication(null,Preset.METHYLPHENIDATE_IR,10.0)
+        val start=LocalDate.of(2026,3,29).atStartOfDay(ZoneId.of("Europe/Berlin"))
+        val end=start.toLocalDate().plusDays(1).atStartOfDay(start.zone)
+        assertEquals(23,Duration.between(start,end).toHours().toInt())
+        store.saveNonUse(NonUse("day",med,start.toInstant().toEpochMilli(),end.toInstant().toEpochMilli(),end.toInstant().toEpochMilli(),start.zone.id,start.offset.id,kind="day"))
+        store.saveObservation(Observation("quality","sleep","rated",4,start.toInstant().toEpochMilli(),end.toInstant().toEpochMilli(),start.zone.id,start.offset.id,scaleVersion=2,sleepDate="2026-03-28"))
+        val restored=BackupCrypto.decrypt(BackupCrypto.encrypt(store.backup(),"test passphrase".toCharArray()),"test passphrase".toCharArray())
+        assertEquals(4,restored.version);assertEquals(2,restored.observations.single().scaleVersion);assertEquals("day",restored.nonUse.single().kind)
+        assertFalse(restored.nonUse.single().contains(end.toInstant().toEpochMilli()))
+        store.restore(restored);assertEquals(restored.nonUse,store.snapshot().nonUse)
+    }
+    @Test fun damagedRecordCanBeReplacedWithoutLosingRawRecovery() = database { store,_ ->
+        val valid=store.backup()
+        store.writableDatabase.execSQL("INSERT INTO observation(id,details) VALUES('broken','not json')")
+        assertThrows(Exception::class.java) { store.snapshot() }
+        val before=context.noBackupFilesDir.listFiles()?.map { it.name }?.toSet() ?: emptySet()
+        store.restore(valid)
+        assertTrue(store.snapshot().loaded);assertTrue(store.snapshot().observations.isEmpty())
+        val recovery=context.noBackupFilesDir.listFiles()!!.filter { it.name.startsWith("unreadable-") && it.name !in before }
+        assertEquals(1,recovery.size);assertTrue(recovery.single().listFiles()!!.any { it.length()>0 })
+        recovery.forEach { it.deleteRecursively() }
+    }
+    @Test fun savingSupplySettingsDoesNotCreateAnotherPhysicalCount() = database { store,_ ->
+        val med=store.saveMedication(null,Preset.METHYLPHENIDATE_IR,10.0)
+        val value=Supply(med,"tablet",100,2.0,10.0)
+        store.saveSupply(value,20.0,"count")
+        store.updateSupply(value.copy(lowThreshold=5.0,revision=2,countedAt=999))
+        val doc=store.backup()
+        assertEquals(1,doc.stock.count { it.kind=="count" });assertEquals(100L,doc.supplies.single().countedAt)
+        assertEquals(20.0,SupplyLedger.balance(doc,doc.supplies.single()).remaining,0.0)
+    }
+    @Test fun largeLogPersistenceAndSummaryBenchmark() = database { store,_ ->
+        val med=Medication(1,Preset.METHYLPHENIDATE_IR,10.0)
+        for(size in listOf(1000,10000)) {
+            val entries=(1..size).map { DoseEntry(it.toLong(),1,med.preset,10.0,1720000000000L+it*60000L,"UTC","Z") }
+            val doc=BackupDocument(createdAt=1721000000000L,medications=listOf(med),entries=entries,reminders=emptyList())
+            val elapsed=kotlin.system.measureTimeMillis { store.restore(doc) }
+            assertEquals(size,store.snapshot().entries.size)
+            val summaryTime=kotlin.system.measureTimeMillis { assertEquals(size,SummaryBuilder.build(doc,listOf(entries.first().timestamp,entries.last().timestamp+1)).doses) }
+            android.util.Log.i("QA_BENCH","Android records=$size restore_ms=$elapsed summary_ms=$summaryTime")
+        }
+    }
 }

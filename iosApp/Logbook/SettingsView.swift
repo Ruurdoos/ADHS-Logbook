@@ -17,13 +17,19 @@ struct SettingsView: View {
                 }
                 Button(l("＋ Add medication")) { edit(blankMedication()) }
             }
+            Section(l("Archived medications")) {
+                ForEach(store.state.document.medications.filter { !$0.active }) { med in Button(l("Reactivate")+" · "+med.name) { var active = med;active.active = true;store.attempt { try await store.save(active) } } }
+            }
             Section(l("Reminders")) {
                 Toggle(l("Reminders"), isOn: Binding(get: { store.state.remindersEnabled }, set: store.enableReminders))
+                if store.state.remindersEnabled && store.notificationsAllowed == false { Text(l("Notifications are turned off. Your reminder times are saved.")) }
+                if store.state.remindersEnabled && store.state.document.reminders.isEmpty { Text(l("No reminder times. Add a time to receive reminders.")) }
+                if store.state.document.pause.active() { Text(l("Reminders are paused.")) }
                 Text(l("A gentle reminder to log. Delivery may be delayed by battery settings.")).font(.footnote)
                 ForEach(store.state.document.reminders) { item in
                     HStack {
                         Button { reminder = item } label: { Text(Calendar.current.date(bySettingHour: item.hour, minute: item.minute, second: 0, of: Date())!, format: .dateTime.hour().minute()) }
-                        Spacer();Button { store.attempt { try store.change { $0.document.reminders.removeAll { $0.id == item.id } };store.schedule() } } label: { Image(systemName: "minus.circle") }.accessibilityLabel(l("Remove reminder"))
+                        Spacer();Button { store.attempt { try await store.change { $0.document.reminders.removeAll { $0.id == item.id } };store.schedule() } } label: { Image(systemName: "minus.circle") }.accessibilityLabel(l("Remove reminder"))
                     }
                 }
                 Button(l("＋ Add time")) { reminder = ReminderValue(id: 0,hour: 8,minute: 0) }
@@ -31,10 +37,10 @@ struct SettingsView: View {
                 Button(l("Open notification settings")) { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
             }
             Section(l("Optional features")) {
-                Toggle(l("Optional observations"),isOn: Binding(get: { store.state.document.preferences["observations_enabled"] == "true" },set: { enabled in store.attempt { try store.change { $0.document.preferences["observations_enabled"] = String(enabled) } } }))
-                Toggle(l("Measurements"),isOn: Binding(get: { store.state.document.preferences["measurements_enabled"] == "true" },set: { enabled in store.attempt { try store.change { $0.document.preferences["measurements_enabled"] = String(enabled) } } }))
+                Toggle(l("Optional observations"),isOn: Binding(get: { store.state.document.preferences["observations_enabled"] == "true" },set: { enabled in store.attempt { try await store.change { $0.document.preferences["observations_enabled"] = String(enabled) } } }))
+                Toggle(l("Measurements"),isOn: Binding(get: { store.state.document.preferences["measurements_enabled"] == "true" },set: { enabled in store.attempt { try await store.change { $0.document.preferences["measurements_enabled"] = String(enabled) } } }))
                 Text(l("Available in observations. Disabling keeps saved records."))
-                Toggle(l("Weekly overview"),isOn: Binding(get: { store.state.document.preferences["weekly_enabled"] == "true" },set: { enabled in store.attempt { try store.change { $0.document.preferences["weekly_enabled"] = String(enabled) } } }))
+                Toggle(l("Weekly overview"),isOn: Binding(get: { store.state.document.preferences["weekly_enabled"] == "true" },set: { enabled in store.attempt { try await store.change { $0.document.preferences["weekly_enabled"] = String(enabled) } } }))
                 NavigationLink(l("Quick access")) { QuickAccessView() }
                 NavigationLink(l("Pause reminders")) { PauseForm() }
                 NavigationLink(l("Supply")) { SupplyForm() }
@@ -49,7 +55,7 @@ struct SettingsView: View {
         }.navigationTitle(l("Settings"))
             .sheet(item: $reminder) { ReminderForm(value: $0) }
             .confirmationDialog(l("Remove medication?"), isPresented: Binding(get: { removing != nil },set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
-                Button(l("Remove"),role: .destructive) { if var med = removing { med.active = false;store.attempt { try store.save(med) } };removing = nil }
+                Button(l("Remove"),role: .destructive) { if var med = removing { med.active = false;store.attempt { try await store.save(med) } };removing = nil }
             } message: { Text(l("%s will no longer appear for new doses. Past entries remain in your history.",removing?.name ?? "")) }
     }
 }
@@ -70,9 +76,9 @@ struct ReminderForm: View {
                 Picker(l("Stop this reminder after"),selection: $value.cutoffMinutes) { ForEach([60,120,240],id: \.self) { Text(l("%d minutes",$0)).tag($0) } }
                 Text(l("Snooze adds 10 minutes, up to the cutoff. Reminder text hides medication names.")).font(.footnote)
             }.navigationTitle(l("Reminder options"))
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) {
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) { guard !store.busy else { return };
                     value.hour = Calendar.current.component(.hour,from: time);value.minute = Calendar.current.component(.minute,from: time)
-                    store.attempt { try store.saveReminder(value);dismiss() }
+                    store.attempt { try await store.saveReminder(value);dismiss() }
                 } } }
         }.onAppear { time = Calendar.current.date(bySettingHour: value.hour,minute: value.minute,second: 0,of: Date())! }
     }
@@ -112,7 +118,7 @@ struct BackupView: View {
             if working { ProgressView(l("Working…")) }
         }.navigationTitle(l("Data & privacy"))
             .fileExporter(isPresented: $exporting,document: exportData,contentType: .data,defaultFilename: "ADHS-logbook.adhsbak") { result in
-                switch result { case .success: store.attempt { try store.change { $0.lastBackup = Date() } };message = l("Backup created.")
+                switch result { case .success: store.attempt { try await store.change { $0.lastBackup = Date() } };message = l("Backup created.")
                 case .failure: message = l("Backup failed. The selected file may be incomplete; create a new backup.") };exportData = BinaryDocument(data: Data())
             }
             .fileImporter(isPresented: $importing,allowedContentTypes: [.data],allowsMultipleSelection: false) { result in
@@ -128,11 +134,11 @@ struct BackupView: View {
                 } catch { message = l("Cannot open backup. Check the passphrase and file. Your log was not changed.") };working = false }
             }
             .alert(l("Replace current log?"),isPresented: $showConfirm) {
-                Button(l("Replace log"),role: .destructive) { if let doc = preview { store.attempt { try store.restore(doc);message = l("Backup restored. Reminders are off.") } };preview = nil }
+                Button(l("Replace log"),role: .destructive) { if let doc = preview { store.attempt { try await store.restore(doc);message = l("Backup restored. Reminders are off.") } };preview = nil }
                 Button(l("Cancel"),role: .cancel) { preview = nil }
             } message: {
                 if let doc = preview {
-                    Text(l("Medications: %d · Entries: %d",doc.medications.count,doc.entries.count)+"\n"+backupRange(doc)+"\n"+l("This replaces the current log. A private pre-restore snapshot is kept on this device. Reminders stay off until you enable them."))
+                    Text(l("Medications: %d · Entries: %d",doc.medications.count,doc.entries.count)+"\n"+l("Observations: %d · Measurements: %d · Non-use: %d",doc.observations.count,doc.measurements.count,doc.nonUse.count)+"\n"+backupRange(doc)+"\n"+l("This replaces the current log. A private pre-restore snapshot is kept on this device. Reminders stay off until you enable them."))
                 }
             }
             .alert(message ?? "",isPresented: Binding(get: { message != nil },set: { if !$0 { message = nil } })) { Button(l("Close")) { message = nil } }

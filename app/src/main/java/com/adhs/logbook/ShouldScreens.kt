@@ -5,12 +5,16 @@ import android.app.TimePickerDialog
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.adhs.logbook.shared.*
@@ -33,38 +37,43 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
         DropdownMenu(expanded,{ expanded=false }) { items.forEach { (id,title) -> DropdownMenuItem(text={ Text(tr(title)) },onClick={ onChange(id);expanded=false }) } }
     }
 }
-@Composable fun ShouldScreen(mode: String,state: LogbookState,vm: LogbookViewModel,close: ()->Unit,navigate: (String)->Unit) {
+@Composable fun ShouldScreen(mode: String,state: LogbookState,vm: LogbookViewModel,close: ()->Unit,navigate: (String)->Unit,back: ()->Unit = close) {
     val busy by vm.busy.collectAsState()
+    if(mode=="records") {
+        val rows=remember(state.measurements,state.observations,state.nonUse,state.medications) {
+            (state.measurements.map { Triple(it.timestamp,"measurement:${it.id}",measurementText(it)) }+
+            state.observations.map { Triple(it.timestamp,"observation:${it.id}",tr(categoryName(it.category))+" · "+tr(responseName(it.response))) }+
+            state.nonUse.map { Triple(it.start,"nonuse:${it.id}",tr(nonUseName(it.kind))+" · "+(state.medications.find { m->m.id==it.medicationId }?.name ?: "")) }).sortedByDescending { it.first }
+        }
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal=24.dp),contentPadding=PaddingValues(vertical=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            item { TextButton(back) { Text(tr("Back")) };Text(tr("Observations & non-use"),style=MaterialTheme.typography.headlineSmall) }
+            item { Button({ navigate("observation:") }) { Text(tr("Add observation")) } }
+            if(vm.enabled("measurements_enabled")) item { Button({ navigate("measurement:") }) { Text(tr("Add measurement")) } }
+            item { Button({ navigate("nonuse:") }) { Text(tr("Record not taken")) } }
+            if(rows.isEmpty()) item { Text(tr("No records yet. Unrecorded days remain unknown.")) }
+            items(rows,key={ it.second }) { (time,target,label) -> OutlinedButton({ navigate(target) },Modifier.fillMaxWidth()) { Text(label+"\n"+Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT))) } }
+        }
+        return
+    }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        TextButton(close) { Text(tr("Back")) }
+        TextButton(back) { Text(tr("Back")) }
         when {
             mode=="quick" -> QuickAccessSettings(state)
             mode=="weekly" -> WeeklyView(vm.document())
             mode.startsWith("measurement:") -> MeasurementEditor(state.measurements.find { it.id==mode.substringAfter(':') },busy,{ vm.measurement(it,close) },{ vm.deleteMeasurement(it,close) })
-            mode=="records" -> {
-                Text(tr("Observations & non-use"),style=MaterialTheme.typography.headlineSmall)
-                Button({ navigate("observation:") }) { Text(tr("Add observation")) }
-                if(vm.enabled("measurements_enabled")) Button({ navigate("measurement:") }) { Text(tr("Add measurement")) }
-                Button({ navigate("nonuse:") }) { Text(tr("Record not taken")) }
-                val rows=state.measurements.map { Triple(it.timestamp,"measurement:${it.id}",measurementText(it)) }+state.observations.map { Triple(it.timestamp,"observation:${it.id}",tr(categoryName(it.category))+" · "+tr(responseName(it.response))) }+
-                    state.nonUse.map { Triple(it.start,"nonuse:${it.id}",tr("Not taken")+" · "+(state.medications.find { m->m.id==it.medicationId }?.name ?: "")) }
-                if(rows.isEmpty()) Text(tr("No records yet. Unrecorded days remain unknown."))
-                rows.sortedByDescending { it.first }.forEach { (time,target,label) ->
-                    OutlinedButton({ navigate(target) },Modifier.fillMaxWidth()) { Text(label+"\n"+Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT))) }
-                }
-            }
             mode.startsWith("observation:") -> { if(vm.enabled("measurements_enabled")) TextButton({ navigate("measurement:") }) { Text(tr("Add measurement")) };ObservationEditor(state.observations.find { it.id==mode.substringAfter(':') },state,busy,{ vm.observation(it,close) },{ vm.deleteObservation(it,close) }) }
             mode.startsWith("nonuse-occ:") -> {
                 val id=mode.split(':')[1];val selectedMed=mode.substringAfterLast(':').toLongOrNull();val o=vm.occurrence(id);val r=state.reminders.find { it.id==o?.reminderId }
                 if(o!=null && r!=null && selectedMed!=null) {
                     val time=Instant.ofEpochMilli(o.scheduled).atZone(ZoneId.systemDefault())
-                    val value=state.nonUse.find { it.occurrenceId==id } ?: NonUse(UUID.randomUUID().toString(),r.medicationId ?: selectedMed,o.scheduled,o.scheduled,System.currentTimeMillis(),time.zone.id,time.offset.id,occurrenceId=id)
+                    val value=state.nonUse.find { it.occurrenceId==id } ?: NonUse(UUID.randomUUID().toString(),r.medicationId ?: selectedMed,o.scheduled,o.scheduled,System.currentTimeMillis(),time.zone.id,time.offset.id,occurrenceId=id,kind="scheduled")
                     NonUseEditor(value,state,busy,{ vm.nonUse(it,close) },{ vm.deleteNonUse(it,close) })
                 } else Text(tr("Choose a medication."))
             }
             mode.startsWith("nonuse:") -> NonUseEditor(state.nonUse.find { it.id==mode.substringAfter(':') },state,busy,{ vm.nonUse(it,close) },{ vm.deleteNonUse(it,close) })
-            mode=="pause" -> PauseEditor(state.pause,busy) { vm.pause(it);close() }
-            mode=="supply" -> SupplyEditor(state,vm,busy,close)
+            mode=="pause" -> PauseEditor(state.pause,busy) { vm.pause(it,close) }
+            mode.startsWith("supply") -> SupplyEditor(state,vm,busy,close,mode.substringAfter(':',"").toLongOrNull())
             mode=="widget" -> WidgetSetup(state)
         }
     }
@@ -82,36 +91,46 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     Choice("Category",observationCategories.map { it to categoryName(it) },category) { category=it;response="";rating=-1 }
     Choice("Response",observationResponses.map { it to responseName(it) },response) { response=it }
     if(response=="rated") {
-        Text(tr("0 = very low · 4 = very high"))
-        Row { (0..4).forEach { value -> FilterChip(rating==value,{ rating=value },label={ Text(value.toString()) },modifier=Modifier.weight(1f)) } }
+        Text(tr(ratingDescription(category,if(category=="sleep" && original?.category!="sleep") 2 else original?.scaleVersion ?: 1)))
+        Row { (0..4).forEach { value -> FilterChip(rating==value,{ rating=value },label={ Text(value.toString()) },modifier=Modifier.weight(1f).semantics { contentDescription=if(category=="sleep" && (original==null || original.scaleVersion==2)) "$value: ${tr(sleepQualityLabels[value])}" else "$value: ${tr(categoryName(category))}" }) } }
     }
     TimeField("Observation time",time) { time=it }
-    if(category=="sleep") OutlinedTextField(sleep,{ sleep=it },label={ Text(tr("Night starting on (YYYY-MM-DD)")) })
+    if(category=="sleep") { val context=LocalContext.current;val day=runCatching { LocalDate.parse(sleep) }.getOrDefault(LocalDate.now().minusDays(1));Text(tr("Night starting on"));OutlinedButton({ DatePickerDialog(context,{ _,y,m,d -> sleep=LocalDate.of(y,m+1,d).toString() },day.year,day.monthValue-1,day.dayOfMonth).show() }) { Text(sleep) } }
     Choice("Optional dose link",listOf("" to "No dose link")+state.entries.map { it.id.toString() to "${it.medicationName} · ${Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()} · ${doseText(it.doseMg)} ${it.unit}" },link) { link=it }
     Text(tr("A link records your context, not medication causation."),style=MaterialTheme.typography.bodySmall)
     OutlinedTextField(notes,{ notes=it.take(5000) },label={ Text(tr("Notes (optional)")) },minLines=2)
     val valid=response.isNotEmpty() && (response!="rated" || rating>=0) && time<=System.currentTimeMillis() && (category!="sleep" || runCatching { LocalDate.parse(sleep) }.isSuccess)
-    Button({ val zone=Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault());save(Observation(id,category,response,if(response=="rated") rating else null,time,original?.createdAt ?: System.currentTimeMillis(),if(original?.timestamp==time) original.zoneId else zone.zone.id,if(original?.timestamp==time) original.offset else zone.offset.id,sleepDate=if(category=="sleep") sleep else null,doseId=link.toLongOrNull(),notes=notes)) },enabled=!busy && valid) { Text(tr("Save")) }
+    Button({ val zone=Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault());save(Observation(id,category,response,if(response=="rated") rating else null,time,original?.createdAt ?: System.currentTimeMillis(),if(original?.timestamp==time) original.zoneId else zone.zone.id,if(original?.timestamp==time) original.offset else zone.offset.id,scaleVersion=if(category=="sleep" && original?.category!="sleep") 2 else original?.scaleVersion ?: 1,sleepDate=if(category=="sleep") sleep else null,doseId=link.toLongOrNull(),notes=notes)) },enabled=!busy && valid) { Text(tr("Save")) }
     if(original!=null) DeleteRecord { delete(original.id) }
 }
 @Composable private fun NonUseEditor(original: NonUse?,state: LogbookState,busy: Boolean,save: (NonUse)->Unit,delete: (String)->Unit) {
     var med by rememberSaveable { mutableStateOf(original?.medicationId?.toString() ?: "") }
-    var start by rememberSaveable { mutableLongStateOf(original?.start ?: System.currentTimeMillis()) }
-    var end by rememberSaveable { mutableLongStateOf(original?.end ?: start) }
-    var period by rememberSaveable { mutableStateOf(original!=null && original.end>original.start) }
+    var start by rememberSaveable { mutableLongStateOf(original?.start ?: LocalDate.now().minusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()) }
+    var end by rememberSaveable { mutableLongStateOf(original?.end ?: System.currentTimeMillis()) }
+    var kind by rememberSaveable { mutableStateOf(original?.kind ?: "day") }
     var notes by rememberSaveable { mutableStateOf(original?.notes ?: "") }
     val id=rememberSaveable { original?.id ?: UUID.randomUUID().toString() }
+    val zone=Instant.ofEpochMilli(start).atZone(ZoneId.systemDefault())
+    val from=if(kind=="day") zone.toLocalDate().atStartOfDay(zone.zone).toInstant().toEpochMilli() else start
+    val until=when(kind) { "day"->zone.toLocalDate().plusDays(1).atStartOfDay(zone.zone).toInstant().toEpochMilli();"scheduled"->start;else->end }
     Text(tr("Record not taken"),style=MaterialTheme.typography.headlineSmall)
     Text(tr("Only record what you know. Pausing reminders does not record non-use."))
-    Choice("Medication",state.medications.map { it.id.toString() to it.name },med) { med=it }
-    TimeField("Start",start) { start=it }
-    Row { Checkbox(period,{ period=it;end=start });Text(tr("Record a period")) }
-    if(period) TimeField("End",end) { end=it }
+    if(original?.occurrenceId==null) Choice("Medication",state.medications.map { it.id.toString() to it.name },med) { med=it }
+    else Text(state.medications.find { it.id.toString()==med }?.name ?: "")
+    if(original==null) Choice("Record type",listOf("day" to nonUseName("day"),"period" to nonUseName("period")),kind) { kind=it }
+    else Text(tr(nonUseName(kind)))
+    if(kind=="day") {
+        Text(tr("Choose a completed day. For today, record a period ending now."))
+        val context=LocalContext.current
+        OutlinedButton({ DatePickerDialog(context,{ _,y,m,d -> start=LocalDate.of(y,m+1,d).atStartOfDay(zone.zone).toInstant().toEpochMilli() },zone.year,zone.monthValue-1,zone.dayOfMonth).show() }) { Text(zone.toLocalDate().toString()) }
+    } else if(kind=="scheduled") Text(zone.toString())
+    else { TimeField("Start",start) { start=it };TimeField("End",end) { end=it } }
     OutlinedTextField(notes,{ notes=it.take(5000) },label={ Text(tr("Notes (optional)")) })
-    val until=if(period) end else start
-    val overlap=state.entries.any { it.medicationId.toString()==med && it.timestamp in start..until }
+    val candidate=NonUse(id,med.toLongOrNull() ?: 0,from,until,original?.createdAt ?: System.currentTimeMillis(),if(original?.start==from) original.zoneId else zone.zone.id,if(original?.start==from) original.offset else zone.offset.id,notes,original?.occurrenceId,kind)
+    val overlap=state.entries.any { it.medicationId==candidate.medicationId && candidate.contains(it.timestamp) }
     if(overlap) Text(tr("A dose is recorded in this non-use period. Correct one record first."))
-    Button({ val zone=Instant.ofEpochMilli(start).atZone(ZoneId.systemDefault());save(NonUse(id,med.toLong(),start,until,original?.createdAt ?: System.currentTimeMillis(),if(original?.start==start) original.zoneId else zone.zone.id,if(original?.start==start) original.offset else zone.offset.id,notes,original?.occurrenceId)) },enabled=!busy && med.isNotBlank() && until>=start && until<=System.currentTimeMillis() && !overlap) { Text(tr("Save")) }
+    if(until>System.currentTimeMillis()) Text(tr("Choose a completed day or a period ending in the past."))
+    Button({ save(candidate) },enabled=!busy && med.isNotBlank() && until>=from && (kind!="period" || until>from) && until<=System.currentTimeMillis() && !overlap) { Text(tr("Save")) }
     if(original!=null && state.nonUse.any { it.id==original.id }) DeleteRecord { delete(original.id) }
 }
 @Composable private fun DeleteRecord(remove: ()->Unit) {
@@ -124,13 +143,13 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     var timed by rememberSaveable { mutableStateOf(original.until!=null) }
     var until by rememberSaveable { mutableLongStateOf(original.until ?: System.currentTimeMillis()+86400000) }
     Text(tr("Pause reminders"),style=MaterialTheme.typography.headlineSmall)
-    Row { Switch(paused,{ paused=it });Text(tr("Pause reminders")) }
+    Row { Switch(paused,{ paused=it },Modifier.semantics { contentDescription=tr("Pause reminders") });Text(tr("Pause reminders")) }
     Text(tr("This pauses notifications only. It does not record medication use or non-use."))
-    if(paused) { Row { Checkbox(timed,{ timed=it });Text(tr("Resume at a chosen time")) };if(timed) TimeField("Resume at",until) { until=it } }
+    if(paused) { Row { Checkbox(timed,{ timed=it },Modifier.semantics { contentDescription=tr("Resume at a chosen time") });Text(tr("Resume at a chosen time")) };if(timed) TimeField("Resume at",until) { until=it } }
     Button({ save(ReminderPause(paused,if(paused && timed) until else null)) },enabled=!busy && (!paused || !timed || until>System.currentTimeMillis())) { Text(tr("Save")) }
 }
-@Composable private fun SupplyEditor(state: LogbookState,vm: LogbookViewModel,busy: Boolean,close: ()->Unit) {
-    var medId by rememberSaveable { mutableStateOf("") }
+@Composable private fun SupplyEditor(state: LogbookState,vm: LogbookViewModel,busy: Boolean,close: ()->Unit,initialMed: Long? = null) {
+    var medId by rememberSaveable { mutableStateOf(initialMed?.toString() ?: "") }
     val med=state.medications.find { it.id.toString()==medId }
     val existing=state.supplies.find { it.medicationId==med?.id }
     var unit by rememberSaveable(medId) { mutableStateOf(existing?.unitLabel ?: "") }
@@ -145,7 +164,8 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     val context=LocalContext.current
     var alerts by rememberSaveable { mutableStateOf(vm.supplyNotificationsEnabled()) }
     val permission=androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
-    Row { Switch(alerts,{ alerts=it;vm.preference("supply_enabled",it.toString());if(it && android.os.Build.VERSION.SDK_INT>=33) permission.launch(android.Manifest.permission.POST_NOTIFICATIONS) });Text(tr("Supply notifications")) }
+    Row { Switch(alerts,{ alerts=it;vm.preference("supply_enabled",it.toString());if(it && android.os.Build.VERSION.SDK_INT>=33) permission.launch(android.Manifest.permission.POST_NOTIFICATIONS) },enabled=!busy,modifier=Modifier.semantics { contentDescription=tr("Supply notifications") });Text(tr("Supply notifications")) }
+    if(alerts && !androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) Text(tr("Notifications are off in system settings. Enable them to receive supply alerts."))
     Text(tr("After restore, notifications stay off until you enable them here."))
     Choice("Medication",state.medications.filter { it.active }.map { it.id.toString() to it.name },medId) { medId=it }
     if(med!=null) {
@@ -162,9 +182,10 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
         OutlinedTextField(threshold,{ threshold=it },label={ Text(tr("Low-stock threshold")) })
         OutlinedTextField(mapping,{ mapping=it },label={ Text(tr("Dose amount per package unit (optional)")) })
         Text(tr("Mapping uses the medication's logging unit. Leave blank to record stock units explicitly in each dose. No conversion is inferred."),style=MaterialTheme.typography.bodySmall)
-        Row { Checkbox(rx,{ rx=it });Text(tr("Prescription request reminder")) }
+        Row { Checkbox(rx,{ rx=it },Modifier.semantics { contentDescription=tr("Prescription request reminder") });Text(tr("Prescription request reminder")) }
         if(rx) TimeField("Prescription request date",rxDate) { rxDate=it }
         fun nonnegative(text: String)=text.replace(',','.').toDoubleOrNull()?.takeIf { it.isFinite() && it>=0 }
+        if(existing!=null) Button({ vm.supplySettings(existing.copy(unitLabel=unit.trim(),lowThreshold=nonnegative(threshold)!!,dosePerUnit=parseDose(mapping),doseUnit=med.unit,prescriptionDate=if(rx) rxDate else null,revision=existing.revision+1),close) },enabled=!busy && unit.isNotBlank() && nonnegative(threshold)!=null && (mapping.isBlank() || parseDose(mapping)!=null)) { Text(tr("Save settings without recounting")) }
         Button({ vm.supply(Supply(med.id,unit.trim(),System.currentTimeMillis(),nonnegative(threshold)!!,parseDose(mapping),med.unit,if(rx) rxDate else null,(existing?.revision ?: 0)+1),nonnegative(counted)!!,action,close) },enabled=!busy && unit.isNotBlank() && nonnegative(counted)!=null && nonnegative(threshold)!=null && (mapping.isBlank() || parseDose(mapping)!=null)) { Text(tr("Save count and settings")) }
         if(existing!=null) DeleteRecord { vm.removeSupply(med.id,close) }
     }
@@ -176,7 +197,7 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     var message by remember { mutableStateOf<String?>(null) }
     Text(tr("Home-screen widget"),style=MaterialTheme.typography.headlineSmall)
     Choice("Medication",state.medications.filter { it.active }.map { it.id.toString() to it.name },medId) { medId=it }
-    Row { Checkbox(private,{ private=it });Text(tr("Generic widget content")) }
+    Row { Checkbox(private,{ private=it },Modifier.semantics { contentDescription=tr("Generic widget content") });Text(tr("Generic widget content")) }
     Text(tr("App lock always hides widget details. Changed medication settings require review in the app."))
     Button({ state.medications.find { it.id.toString()==medId }?.let { med ->
         LogWidget.configure(context,med.id,med.revision,private)

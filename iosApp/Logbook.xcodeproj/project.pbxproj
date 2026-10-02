@@ -37,7 +37,7 @@
 000000000000000000000009 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 00000000000000000000000A = { isa = XCConfigurationList; buildConfigurations = (00000000000000000000000C,00000000000000000000000D); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
 00000000000000000000000B = { isa = XCConfigurationList; buildConfigurations = (00000000000000000000000E,00000000000000000000000F); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
-00000000000000000000000C = { isa = XCBuildConfiguration; name = Debug; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; }; };
+00000000000000000000000C = { isa = XCBuildConfiguration; name = Debug; buildSettings = { SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; }; };
 00000000000000000000000D = { isa = XCBuildConfiguration; name = Release; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; }; };
 00000000000000000000000E = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = com.adhs.logbook.quietsage; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0;
 GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Logbook/Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "ADHS Logbook"; INFOPLIST_KEY_UILaunchScreen_Generation = YES;

@@ -70,3 +70,9 @@ See [Must implementation validation](artifacts/MUST_VALIDATION.md), [Must plan](
 See [Should validation](artifacts/SHOULD_VALIDATION.md) and the completed [Should plan](docs/plans/02-should-implementation.md). See [Could validation](artifacts/COULD_VALIDATION.md) and the implemented [Could plan](docs/plans/03-could-implementation.md). The excluded best-time/dose insights, predicted crash alerts, voice logging, full watch apps, and alternate font were not added.
 
 Design references: [screen board](screens.html) and [design handoff](DESIGN.md). The screen board is an illustrative prototype, not the application or a validated clinical model.
+
+## QA remediation update
+
+You can start without medication or restore a backup directly from Welcome. Independent observations and measurements remain available without a prescription. Sleep ratings explicitly record quality; historical ratings keep their original meaning. Non-use distinguishes a missed scheduled dose from a completed day or a period without doses.
+
+History supports medication and note search. Archived medications can be reactivated. iOS dose corrections support changing medication with an explicit amount review. Supply settings can be updated without resetting the physical count. Reports use separate Create and Share actions and invalidate stale results. See [backup schema 4](docs/BACKUP_FORMAT.md), [report format 4](docs/REPORT_FORMAT.md), and [remediation validation](artifacts/QA_REMEDIATION.md).

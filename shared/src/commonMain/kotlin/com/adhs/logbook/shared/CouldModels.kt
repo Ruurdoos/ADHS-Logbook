@@ -41,7 +41,7 @@ object QuickAccessPolicy {
     }
 }
 @Serializable
-data class ObservationDistribution(val category: String, val response: String, val value: Int?, val count: Int)
+data class ObservationDistribution(val category: String, val response: String, val value: Int?, val count: Int, val scaleVersion: Int = 1)
 @Serializable
 data class MoodCount(val value: Int,val count: Int)
 @Serializable
@@ -53,10 +53,10 @@ object WeeklyBuilder {
         require(boundaries.size==8)
         val summary=SummaryBuilder.build(doc,boundaries)
         val days=boundaries.zipWithNext().map { (a,b) -> WeekDay(a,doc.entries.filter { it.timestamp>=a && it.timestamp<b }.sortedBy { it.timestamp },
-            doc.observations.filter { it.timestamp>=a && it.timestamp<b }.sortedBy { it.timestamp },doc.nonUse.filter { it.start<b && it.end>=a },
+            doc.observations.filter { it.timestamp>=a && it.timestamp<b }.sortedBy { it.timestamp },doc.nonUse.filter { it.intersects(a,b) },
             doc.measurements.filter { it.timestamp>=a && it.timestamp<b }.sortedBy { it.timestamp }) }
         val observations=days.flatMap { it.observations }
-        return WeeklyOverview(summary,days,observations.groupBy { Triple(it.category,it.response,it.value) }.map { (key,values) -> ObservationDistribution(key.first,key.second,key.third,values.size) },
+        return WeeklyOverview(summary,days,observations.groupBy { listOf(it.category,it.response,it.value,it.scaleVersion) }.map { (_,values) -> ObservationDistribution(values.first().category,values.first().response,values.first().value,values.size,values.first().scaleVersion) },
             days.flatMap { it.doses }.mapNotNull { it.mood }.groupingBy { it }.eachCount().map { MoodCount(it.key,it.value) })
     }
 }

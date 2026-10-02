@@ -1,32 +1,34 @@
 import XCTest
 
 final class LoggingUITests: XCTestCase {
+    private let fixtureID = UUID().uuidString
+    override func setUp() { super.setUp();continueAfterFailure = false }
     func testLoggingUndoAndGermanLargeText() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        app.launch()
+        app.launchArguments += ["--ui-test-data",fixtureID];app.launch()
         if app.buttons["Get started"].waitForExistence(timeout: 5) {
             app.buttons["Get started"].tap()
             let dose = app.textFields["Your usual dose (mg)"]
             XCTAssertTrue(dose.waitForExistence(timeout: 5));dose.tap();dose.typeText("10")
             app.buttons["Save"].tap()
         }
-        let quick = app.buttons["Log now · 10 mg"]
+        let quick = app.buttons["Record 10 mg now"]
         XCTAssertTrue(quick.waitForExistence(timeout: 10));quick.tap()
         let undo = app.buttons["Dose logged · Undo"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5));undo.tap()
-        app.buttons["Log dose"].tap()
+        app.buttons["Edit amount or time"].tap()
         XCTAssertTrue(app.textFields["Dose (mg)"].waitForExistence(timeout: 5))
         app.buttons["Save"].tap()
         XCTAssertTrue(app.staticTexts["Last logged"].waitForExistence(timeout: 5))
         app.buttons["Dose logged · Undo"].tap()
         app.terminate()
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        app.launch()
-        XCTAssertTrue(app.buttons["Jetzt erfassen · 10 mg"].waitForExistence(timeout: 10))
+        app.launchArguments += ["--ui-test-data",fixtureID];app.launch()
+        XCTAssertTrue(app.buttons["Jetzt 10 mg erfassen"].waitForExistence(timeout: 10))
         let home = XCTAttachment(screenshot: app.screenshot());home.name = "German large text home";home.lifetime = .keepAlways;add(home)
-        app.buttons["Dosis erfassen"].tap()
+        app.buttons["Menge oder Zeitpunkt bearbeiten"].tap()
         XCTAssertTrue(app.textFields["Dosis (mg)"].waitForExistence(timeout: 5))
         let form = XCTAttachment(screenshot: app.screenshot());form.name = "German large text form";form.lifetime = .keepAlways;add(form)
         app.buttons["Speichern"].tap()
@@ -34,7 +36,7 @@ final class LoggingUITests: XCTestCase {
     }
     func testObservationWithoutDoseAndSummaryOptions() {
         continueAfterFailure = false
-        let app = XCUIApplication();app.launchArguments = ["-AppleLanguages","(en)","-AppleLocale","en_US"];app.launch()
+        let app = XCUIApplication();app.launchArguments = ["-AppleLanguages","(en)","-AppleLocale","en_US"];app.launchArguments += ["--ui-test-data",fixtureID];app.launch()
         if app.buttons["Get started"].waitForExistence(timeout: 3) {
             app.buttons["Get started"].tap();let dose = app.textFields["Your usual dose (mg)"];XCTAssertTrue(dose.waitForExistence(timeout: 5));dose.tap();dose.typeText("10");app.buttons["Save"].tap()
         }
@@ -52,7 +54,7 @@ final class LoggingUITests: XCTestCase {
 
     func testOptionalMeasurementAndWeeklyOverview() {
         continueAfterFailure = false
-        let app = XCUIApplication();app.launchArguments = ["-AppleLanguages","(en)","-AppleLocale","en_US","-UIPreferredContentSizeCategoryName","UICTContentSizeCategoryL"];app.launch()
+        let app = XCUIApplication();app.launchArguments = ["-AppleLanguages","(en)","-AppleLocale","en_US","-UIPreferredContentSizeCategoryName","UICTContentSizeCategoryL"];app.launchArguments += ["--ui-test-data",fixtureID];app.launch()
         if app.buttons["Get started"].waitForExistence(timeout: 3) {
             app.buttons["Get started"].tap();let dose = app.textFields["Your usual dose (mg)"];XCTAssertTrue(dose.waitForExistence(timeout: 5));dose.tap();dose.typeText("10");app.buttons["Save"].tap()
         }
@@ -73,4 +75,21 @@ final class LoggingUITests: XCTestCase {
         let image = XCTAttachment(screenshot: app.screenshot());image.name = "Could weekly overview";image.lifetime = .keepAlways;add(image)
     }
 
+    func testMedicationFreeOnboardingAndSleepQuality() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-AppleLanguages","(en)","-AppleLocale","en_US","--ui-test-data",UUID().uuidString]
+        app.launch()
+        XCTAssertTrue(app.buttons["Start without medication"].waitForExistence(timeout: 10))
+        app.buttons["Start without medication"].tap()
+        XCTAssertTrue(app.buttons["Add observation"].waitForExistence(timeout: 10))
+        app.buttons["Add observation"].tap()
+        app.buttons["Category, Focus / everyday functioning"].tap();app.buttons["Sleep"].tap()
+        app.buttons["Response, Choose a response"].tap();app.buttons["Rating"].tap()
+        XCTAssertTrue(app.staticTexts["Sleep quality: 0 = very poor · 4 = very good"].exists)
+        app.buttons["Rating, Choose a response"].tap();app.buttons["4: Very good"].tap()
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.buttons["Add measurement"].waitForExistence(timeout: 10))
+        app.tabBars.buttons["History"].tap();app.buttons["Observations & non-use"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@","Sleep")).firstMatch.waitForExistence(timeout: 5))
+    }
 }

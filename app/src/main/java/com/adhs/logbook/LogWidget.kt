@@ -46,7 +46,7 @@ class LogWidget: GlanceAppWidget() {
             store.transaction {
                 val prefs=context.getSharedPreferences("widget",Context.MODE_PRIVATE)
                 require(token.isNotBlank() && prefs.getString("token",null)==token && !prefs.getBoolean("private",true))
-                require(!AppPrivacy.isEnabled(context) || AppPrivacy.unlocked)
+                require(!AppPrivacy.isEnabled(context))
                 val med=store.snapshot().medications.first { it.id==prefs.getLong("med",0) && it.active && it.revision==prefs.getLong("revision",0) }
                 id=LogDose(store,LogClock { now.toInstant().toEpochMilli() }).now(med,"widget:$token",now.zone.id,now.offset.id)
             }

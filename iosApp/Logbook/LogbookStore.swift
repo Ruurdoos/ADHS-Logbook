@@ -133,7 +133,8 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
         try await change { s in s.document.entries.removeAll { $0.id == id };for i in s.document.observations.indices where s.document.observations[i].doseId == id { s.document.observations[i].doseId = nil };for i in s.occurrences.indices where s.occurrences[i].entryId == id { s.occurrences[i].state = "undone" } }
         if undoID == id { undoID = nil };schedule()
     }
-    func saveReminder(_ value: ReminderValue) throws {
+    func saveReminder(_ value: ReminderValue) async throws {
+        guard !state.document.reminders.contains(where: { $0.id != value.id && $0.hour == value.hour && $0.minute == value.minute }) else { throw AppError.validation("A reminder already exists at this time. Edit it instead.") }
         var r = value
         if r.id == 0 { r.id = (state.document.reminders.map(\.id).max() ?? 0) + 1 }
         r.revision = (state.document.reminders.first { $0.id == r.id }?.revision ?? 0) + 1

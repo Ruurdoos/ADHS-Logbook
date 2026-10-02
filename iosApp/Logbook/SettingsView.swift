@@ -29,7 +29,7 @@ struct SettingsView: View {
                 ForEach(store.state.document.reminders) { item in
                     HStack {
                         Button { reminder = item } label: { Text(Calendar.current.date(bySettingHour: item.hour, minute: item.minute, second: 0, of: Date())!, format: .dateTime.hour().minute()) }
-                        Spacer();Button { store.attempt { try store.change { $0.document.reminders.removeAll { $0.id == item.id } };store.schedule() } } label: { Image(systemName: "minus.circle") }.accessibilityLabel(l("Remove reminder"))
+                        Spacer();Button { store.attempt { try await store.change { $0.document.reminders.removeAll { $0.id == item.id } };store.schedule() } } label: { Image(systemName: "minus.circle") }.accessibilityLabel(l("Remove reminder"))
                     }
                 }
                 Button(l("＋ Add time")) { reminder = ReminderValue(id: 0,hour: 8,minute: 0) }
@@ -37,10 +37,10 @@ struct SettingsView: View {
                 Button(l("Open notification settings")) { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
             }
             Section(l("Optional features")) {
-                Toggle(l("Optional observations"),isOn: Binding(get: { store.state.document.preferences["observations_enabled"] == "true" },set: { enabled in store.attempt { try store.change { $0.document.preferences["observations_enabled"] = String(enabled) } } }))
-                Toggle(l("Measurements"),isOn: Binding(get: { store.state.document.preferences["measurements_enabled"] == "true" },set: { enabled in store.attempt { try store.change { $0.document.preferences["measurements_enabled"] = String(enabled) } } }))
+                Toggle(l("Optional observations"),isOn: Binding(get: { store.state.document.preferences["observations_enabled"] == "true" },set: { enabled in store.attempt { try await store.change { $0.document.preferences["observations_enabled"] = String(enabled) } } }))
+                Toggle(l("Measurements"),isOn: Binding(get: { store.state.document.preferences["measurements_enabled"] == "true" },set: { enabled in store.attempt { try await store.change { $0.document.preferences["measurements_enabled"] = String(enabled) } } }))
                 Text(l("Available in observations. Disabling keeps saved records."))
-                Toggle(l("Weekly overview"),isOn: Binding(get: { store.state.document.preferences["weekly_enabled"] == "true" },set: { enabled in store.attempt { try store.change { $0.document.preferences["weekly_enabled"] = String(enabled) } } }))
+                Toggle(l("Weekly overview"),isOn: Binding(get: { store.state.document.preferences["weekly_enabled"] == "true" },set: { enabled in store.attempt { try await store.change { $0.document.preferences["weekly_enabled"] = String(enabled) } } }))
                 NavigationLink(l("Quick access")) { QuickAccessView() }
                 NavigationLink(l("Pause reminders")) { PauseForm() }
                 NavigationLink(l("Supply")) { SupplyForm() }
@@ -55,7 +55,7 @@ struct SettingsView: View {
         }.navigationTitle(l("Settings"))
             .sheet(item: $reminder) { ReminderForm(value: $0) }
             .confirmationDialog(l("Remove medication?"), isPresented: Binding(get: { removing != nil },set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
-                Button(l("Remove"),role: .destructive) { if var med = removing { med.active = false;store.attempt { try store.save(med) } };removing = nil }
+                Button(l("Remove"),role: .destructive) { if var med = removing { med.active = false;store.attempt { try await store.save(med) } };removing = nil }
             } message: { Text(l("%s will no longer appear for new doses. Past entries remain in your history.",removing?.name ?? "")) }
     }
 }
@@ -76,9 +76,9 @@ struct ReminderForm: View {
                 Picker(l("Stop this reminder after"),selection: $value.cutoffMinutes) { ForEach([60,120,240],id: \.self) { Text(l("%d minutes",$0)).tag($0) } }
                 Text(l("Snooze adds 10 minutes, up to the cutoff. Reminder text hides medication names.")).font(.footnote)
             }.navigationTitle(l("Reminder options"))
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) {
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) { guard !store.busy else { return };
                     value.hour = Calendar.current.component(.hour,from: time);value.minute = Calendar.current.component(.minute,from: time)
-                    store.attempt { try store.saveReminder(value);dismiss() }
+                    store.attempt { try await store.saveReminder(value);dismiss() }
                 } } }
         }.onAppear { time = Calendar.current.date(bySettingHour: value.hour,minute: value.minute,second: 0,of: Date())! }
     }

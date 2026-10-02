@@ -681,11 +681,12 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
                 Switch(state.remindersEnabled,{ enabled ->
                     if(enabled && Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
                     else { denied=!NotificationManagerCompat.from(context).areNotificationsEnabled(); vm.reminders(enabled) }
-                },enabled=!busy)
+                },enabled=!busy,modifier=Modifier.semantics { contentDescription=tr("Reminders") })
             }
             Note("A gentle reminder to log. Delivery may be delayed by battery settings.")
         }
         if(state.remindersEnabled) {
+            item { Note(when { denied -> "Notifications are turned off. Your reminder times are saved.";state.pause.active(System.currentTimeMillis()) -> "Reminders are paused.";state.reminders.isEmpty() -> "No reminder times. Add a time to receive reminders.";else -> "Reminders are scheduled." }) }
             items(state.reminders,key={ "reminder-${it.id}" }) { reminder ->
                 Row(verticalAlignment=Alignment.CenterVertically) {
                     OutlinedButton({ TimePickerDialog(context,{ _,h,m -> vm.reminder(h,m,reminder.id) },reminder.hour,reminder.minute,android.text.format.DateFormat.is24HourFormat(context)).show() },Modifier.weight(1f),enabled=!busy) { Text(LocalTime.of(reminder.hour,reminder.minute).format(timeFormat)) }
@@ -705,9 +706,9 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
         item { TextButton({ onShould("pause") }) { Text(tr(if(state.pause.active(System.currentTimeMillis())) "Resume / change pause" else "Pause reminders")) } }
         item { TextButton({ onShould("widget") }) { Text(tr("Home-screen widget")) } }
         item { TextButton({ onShould("supply") }) { Text(tr("Supply")) } }
-        item { Row { Text(tr("Optional observations"),Modifier.weight(1f));Switch(vm.observationsEnabled(),{ vm.preference("observations_enabled",it.toString()) }) } }
-        item { Row { Text(tr("Measurements"),Modifier.weight(1f));Switch(vm.enabled("measurements_enabled"),{ vm.preference("measurements_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Measurements") }) }; Text(tr("Available in observations. Disabling keeps saved records.")) }
-        item { Row { Text(tr("Weekly overview"),Modifier.weight(1f));Switch(vm.enabled("weekly_enabled"),{ vm.preference("weekly_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Weekly overview") }) } }
+        item { Row { Text(tr("Optional observations"),Modifier.weight(1f));Switch(vm.observationsEnabled(),{ vm.preference("observations_enabled",it.toString()) },enabled=!busy,modifier=Modifier.semantics { contentDescription=tr("Show observation shortcut on Home") }) } }
+        item { Row { Text(tr("Measurements"),Modifier.weight(1f));Switch(vm.enabled("measurements_enabled"),{ vm.preference("measurements_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Measurements") },enabled=!busy) }; Text(tr("Available in observations. Disabling keeps saved records.")) }
+        item { Row { Text(tr("Weekly overview"),Modifier.weight(1f));Switch(vm.enabled("weekly_enabled"),{ vm.preference("weekly_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Weekly overview") },enabled=!busy) } }
         item { TextButton({ onShould("quick") }) { Text(tr("Quick access")) } }
         item { BackupControls(vm,busy) }
         item { TextButton(onExport) { Text(tr("Export your log →")) } }

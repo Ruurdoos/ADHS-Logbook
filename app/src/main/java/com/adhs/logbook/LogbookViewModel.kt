@@ -139,7 +139,6 @@ class LogbookViewModel(application: Application) : AndroidViewModel(application)
     fun reminder(value: Reminder) = perform { store.saveReminder(value); ReminderScheduler.reconcile(getApplication(),store) }
     fun delete(id: Long, after: () -> Unit = {}) = perform(after) { store.deleteEntry(id) }
     fun reminders(enabled: Boolean) = perform {
-        if(enabled && store.snapshot().reminders.isEmpty()) store.saveReminder(8,0)
         store.setPref("reminders", enabled.toString())
         ReminderScheduler.reschedule(getApplication(),store.snapshot())
     }

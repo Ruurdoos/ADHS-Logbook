@@ -121,6 +121,7 @@ class Store(private val context: Context, private val name: String = "logbook.db
     }
     fun saveReminder(reminder: Reminder) = transaction {
         require(reminder.hour in 0..23 && reminder.minute in 0..59 && reminder.cutoffMinutes in 30..240)
+        validateField(snapshot().reminders.none { it.id!=reminder.id && it.hour==reminder.hour && it.minute==reminder.minute },"A reminder already exists at this time. Edit it instead.")
         val previous=snapshot().reminders.find { it.id==reminder.id }
         val values=ContentValues().apply { put("hour",reminder.hour);put("minute",reminder.minute) }
         val id=if(reminder.id==0) writableDatabase.insertOrThrow("reminder",null,values).toInt() else reminder.id.also {

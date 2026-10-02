@@ -128,7 +128,7 @@ struct PauseForm: View {
             Toggle(l("Pause reminders"),isOn: $paused)
             Text(l("This pauses notifications only. It does not record medication use or non-use."))
             if paused { Toggle(l("Resume at a chosen time"),isOn: $timed);if timed { DatePicker(l("Resume at"),selection: $until,in: Date()...) } }
-            Button(l("Save")) { store.attempt { try store.pause(PauseValue(paused: paused,until: paused && timed ? millis(until) : nil)) } }
+            Button(l("Save")) { guard !store.busy else { return }; store.attempt { try await store.pause(PauseValue(paused: paused,until: paused && timed ? millis(until) : nil)) } }
         }.navigationTitle(l("Pause reminders"))
             .onAppear { paused = store.state.document.pause.active();timed = store.state.document.pause.until != nil;if let end = store.state.document.pause.until { until = date(end) } }
     }

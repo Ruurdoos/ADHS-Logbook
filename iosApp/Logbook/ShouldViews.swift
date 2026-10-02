@@ -94,3 +94,48 @@ struct PauseForm: View {
             .onAppear { paused = store.state.document.pause.active();timed = store.state.document.pause.until != nil;if let end = store.state.document.pause.until { until = date(end) } }
     }
 }
+struct SupplyForm: View {
+    @EnvironmentObject var store: LogbookStore
+    @State var medId: Int64 = 0
+    @State var unit = ""
+    @State var count = ""
+    @State var threshold = ""
+    @State var mapping = ""
+    @State var rx = false
+    @State var rxDate = Date().addingTimeInterval(7*86400)
+    @State var restock = ""
+    @State var action = UUID().uuidString
+    @State var deleting = false
+    var existing: SupplyValue? { store.state.document.supplies.first { $0.medicationId == medId } }
+    func nonnegative(_ input: String) -> Double? { Double(input.replacingOccurrences(of: ",",with: ".")).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } }
+    var body: some View {
+        Form {
+            Toggle(l("Supply notifications"),isOn: Binding(get: { store.state.supplyNotificationsEnabled == true },set: { store.enableSupplyNotifications($0) }))
+            Text(l("After restore, notifications stay off until you enable them here.")).font(.footnote)
+            Picker(l("Medication"),selection: $medId) { Text(l("Choose medication")).tag(Int64(0));ForEach(store.state.document.medications.filter(\.active)) { Text($0.name).tag($0.id) } }
+                .onChange(of: medId) { _ in unit = existing?.unitLabel ?? "";count = "";threshold = existing.map { number($0.lowThreshold) } ?? "";mapping = existing?.dosePerUnit.map(number) ?? "";rx = existing?.prescriptionDate != nil;rxDate = existing?.prescriptionDate.map(date) ?? Date().addingTimeInterval(7*86400);action = UUID().uuidString }
+            if medId != 0 {
+                if let supply = existing, let balance = try? store.state.document.balance(medId) {
+                    Text(l("Estimated remaining: %s %s",number(balance.remaining),supply.unitLabel))
+                    if balance.inconsistent { Text(l("Count may be incomplete. Review uncounted logs or recount.")) }
+                    TextField(l("Restock units"),text: $restock).keyboardType(.decimalPad)
+                    Button(l("Add restock")) { store.attempt { try store.restock(medId,units: parseNumber(restock)!,action: action);restock = "";action = UUID().uuidString } }.disabled(parseNumber(restock) == nil)
+                }
+                Text(l("Use a physical count. Package units are separate from the logged dose."))
+                TextField(l("Package unit label"),text: $unit)
+                TextField(l("Counted stock now"),text: $count).keyboardType(.decimalPad)
+                TextField(l("Low-stock threshold"),text: $threshold).keyboardType(.decimalPad)
+                TextField(l("Dose amount per package unit (optional)"),text: $mapping).keyboardType(.decimalPad)
+                Text(l("Mapping uses the medication's logging unit. Leave blank to record stock units explicitly in each dose. No conversion is inferred.")).font(.footnote)
+                Toggle(l("Prescription request reminder"),isOn: $rx)
+                if rx { DatePicker(l("Prescription request date"),selection: $rxDate,displayedComponents: [.date,.hourAndMinute]) }
+                Button(l("Save count and settings")) { if let med = store.state.document.medications.first(where: { $0.id == medId }) {
+                    let value = SupplyValue(medicationId: med.id,unitLabel: unit,countedAt: millis(),lowThreshold: nonnegative(threshold)!,dosePerUnit: parseNumber(mapping),doseUnit: med.unit,prescriptionDate: rx ? millis(rxDate) : nil,revision: (existing?.revision ?? 0)+1)
+                    store.attempt { try store.saveSupply(value,count: nonnegative(count)!,action: action);count = "";action = UUID().uuidString }
+                } }.disabled(unit.trimmingCharacters(in: .whitespaces).isEmpty || unit.count > 80 || nonnegative(count) == nil || nonnegative(threshold) == nil || (!mapping.isEmpty && parseNumber(mapping) == nil))
+                if existing != nil { Button(l("Delete record"),role: .destructive) { deleting = true } }
+            }
+        }.navigationTitle(l("Supply"))
+            .confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try store.removeSupply(medId) } } }
+    }
+}

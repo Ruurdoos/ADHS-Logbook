@@ -93,3 +93,43 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     if(paused) { Row { Checkbox(timed,{ timed=it });Text(tr("Resume at a chosen time")) };if(timed) TimeField("Resume at",until) { until=it } }
     Button({ save(ReminderPause(paused,if(paused && timed) until else null)) },enabled=!busy && (!paused || !timed || until>System.currentTimeMillis())) { Text(tr("Save")) }
 }
+@Composable private fun SupplyEditor(state: LogbookState,vm: LogbookViewModel,busy: Boolean,close: ()->Unit) {
+    var medId by rememberSaveable { mutableStateOf("") }
+    val med=state.medications.find { it.id.toString()==medId }
+    val existing=state.supplies.find { it.medicationId==med?.id }
+    var unit by rememberSaveable(medId) { mutableStateOf(existing?.unitLabel ?: "") }
+    var counted by rememberSaveable(medId) { mutableStateOf("") }
+    var threshold by rememberSaveable(medId) { mutableStateOf(existing?.lowThreshold?.let(::doseText) ?: "") }
+    var mapping by rememberSaveable(medId) { mutableStateOf(existing?.dosePerUnit?.let(::doseText) ?: "") }
+    var rx by rememberSaveable(medId) { mutableStateOf(existing?.prescriptionDate!=null) }
+    var rxDate by rememberSaveable(medId) { mutableLongStateOf(existing?.prescriptionDate ?: System.currentTimeMillis()+7*86400000) }
+    var restock by rememberSaveable(medId) { mutableStateOf("") }
+    val action=rememberSaveable(medId) { UUID.randomUUID().toString() }
+    Text(tr("Supply"),style=MaterialTheme.typography.headlineSmall)
+    val context=LocalContext.current
+    var alerts by rememberSaveable { mutableStateOf(vm.supplyNotificationsEnabled()) }
+    val permission=androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+    Row { Switch(alerts,{ alerts=it;vm.preference("supply_enabled",it.toString());if(it && android.os.Build.VERSION.SDK_INT>=33) permission.launch(android.Manifest.permission.POST_NOTIFICATIONS) });Text(tr("Supply notifications")) }
+    Text(tr("After restore, notifications stay off until you enable them here."))
+    Choice("Medication",state.medications.filter { it.active }.map { it.id.toString() to it.name },medId) { medId=it }
+    if(med!=null) {
+        if(existing!=null) {
+            val balance=SupplyLedger.balance(vm.document(),existing)
+            Text(tr("Estimated remaining: %s %s",doseText(balance.remaining),existing.unitLabel))
+            if(balance.inconsistent) Text(tr("Count may be incomplete. Review uncounted logs or recount."))
+            OutlinedTextField(restock,{ restock=it },label={ Text(tr("Restock units")) })
+            Button({ vm.restock(med.id,parseDose(restock)!!,action,close) },enabled=!busy && parseDose(restock)!=null) { Text(tr("Add restock")) }
+        }
+        Text(tr("Use a physical count. Package units are separate from the logged dose."))
+        OutlinedTextField(unit,{ unit=it.take(80) },label={ Text(tr("Package unit label")) })
+        OutlinedTextField(counted,{ counted=it },label={ Text(tr("Counted stock now")) })
+        OutlinedTextField(threshold,{ threshold=it },label={ Text(tr("Low-stock threshold")) })
+        OutlinedTextField(mapping,{ mapping=it },label={ Text(tr("Dose amount per package unit (optional)")) })
+        Text(tr("Mapping uses the medication's logging unit. Leave blank to record stock units explicitly in each dose. No conversion is inferred."),style=MaterialTheme.typography.bodySmall)
+        Row { Checkbox(rx,{ rx=it });Text(tr("Prescription request reminder")) }
+        if(rx) TimeField("Prescription request date",rxDate) { rxDate=it }
+        fun nonnegative(text: String)=text.replace(',','.').toDoubleOrNull()?.takeIf { it.isFinite() && it>=0 }
+        Button({ vm.supply(Supply(med.id,unit.trim(),System.currentTimeMillis(),nonnegative(threshold)!!,parseDose(mapping),med.unit,if(rx) rxDate else null,(existing?.revision ?: 0)+1),nonnegative(counted)!!,action,close) },enabled=!busy && unit.isNotBlank() && nonnegative(counted)!=null && nonnegative(threshold)!=null && (mapping.isBlank() || parseDose(mapping)!=null)) { Text(tr("Save count and settings")) }
+        if(existing!=null) DeleteRecord { vm.removeSupply(med.id,close) }
+    }
+}

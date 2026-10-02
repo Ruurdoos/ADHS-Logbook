@@ -98,6 +98,7 @@ class LogbookViewModel(application: Application) : AndroidViewModel(application)
     fun deleteNonUse(id: String,after: ()->Unit) = perform(after) { store.deleteNonUse(id);ReminderScheduler.reconcile(getApplication(),store) }
     fun pause(value: ReminderPause,after: ()->Unit = {}) = perform(after) { store.pause(value);ReminderScheduler.reconcile(getApplication(),store) }
     fun supply(value: Supply,count: Double,action: String,after: ()->Unit) = perform(after) { store.saveSupply(value,count,action) }
+    fun supplySettings(value: Supply,after: ()->Unit) = perform(after) { store.updateSupply(value) }
     fun restock(id: Long,units: Double,action: String,after: ()->Unit) = perform(after) { store.restock(id,units,action) }
     fun removeSupply(id: Long,after: ()->Unit) = perform(after) { store.removeSupply(id) }
     val backupWorking=MutableStateFlow(false)

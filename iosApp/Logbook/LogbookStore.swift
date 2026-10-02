@@ -273,17 +273,22 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
             s.document.nonUse.removeAll { $0.id == id }
         };schedule()
     }
-    func pause(_ value: PauseValue) throws { try change { $0.document.pause = value };schedule() }
-    func saveSupply(_ value: SupplyValue,count: Double,action: String) throws {
+    func pause(_ value: PauseValue) async throws { try await change { $0.document.pause = value };schedule() }
+    func saveSupply(_ value: SupplyValue,count: Double,action: String) async throws {
         guard !state.document.stock.contains(where: { $0.id == action }) else { return }
-        try change { s in s.document.supplies.removeAll { $0.medicationId == value.medicationId };s.document.supplies.append(value)
+        try await change { s in guard !s.document.stock.contains(where: { $0.id == action }) else { return };s.document.supplies.removeAll { $0.medicationId == value.medicationId };s.document.supplies.append(value)
             s.document.stock.append(MovementValue(id: action,medicationId: value.medicationId,kind: "count",timestamp: value.countedAt,units: count))
         };schedule()
     }
-    func restock(_ med: Int64,units: Double,action: String) throws {
+    func updateSupply(_ value: SupplyValue) async throws {
+        guard let previous = state.document.supplies.first(where: { $0.medicationId == value.medicationId }) else { throw AppError.invalid }
+        var next = value;next.countedAt = previous.countedAt
+        try await change { s in s.document.supplies.removeAll { $0.medicationId == next.medicationId };s.document.supplies.append(next) };schedule()
+    }
+    func restock(_ med: Int64,units: Double,action: String) async throws {
         guard units.isFinite && units > 0 else { throw AppError.invalid }
         guard !state.document.stock.contains(where: { $0.id == action }) else { return }
-        try change { $0.document.stock.append(MovementValue(id: action,medicationId: med,kind: "restock",timestamp: millis(),units: units)) };schedule()
+        try await change { s in guard !s.document.stock.contains(where: { $0.id == action }) else { return };s.document.stock.append(MovementValue(id: action,medicationId: med,kind: "restock",timestamp: millis(),units: units)) };schedule()
     }
     func removeSupply(_ med: Int64) async throws { try await change { s in s.document.supplies.removeAll { $0.medicationId == med };s.document.stock.removeAll { $0.medicationId == med } };schedule() }
     func configureWidget(_ med: Med,generic: Bool) throws {

@@ -72,8 +72,8 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
                 } else Text(tr("Choose a medication."))
             }
             mode.startsWith("nonuse:") -> NonUseEditor(state.nonUse.find { it.id==mode.substringAfter(':') },state,busy,{ vm.nonUse(it,close) },{ vm.deleteNonUse(it,close) })
-            mode=="pause" -> PauseEditor(state.pause,busy) { vm.pause(it);close() }
-            mode=="supply" -> SupplyEditor(state,vm,busy,close)
+            mode=="pause" -> PauseEditor(state.pause,busy) { vm.pause(it,close) }
+            mode.startsWith("supply") -> SupplyEditor(state,vm,busy,close,mode.substringAfter(':',"").toLongOrNull())
             mode=="widget" -> WidgetSetup(state)
         }
     }
@@ -164,7 +164,8 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     val context=LocalContext.current
     var alerts by rememberSaveable { mutableStateOf(vm.supplyNotificationsEnabled()) }
     val permission=androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
-    Row { Switch(alerts,{ alerts=it;vm.preference("supply_enabled",it.toString());if(it && android.os.Build.VERSION.SDK_INT>=33) permission.launch(android.Manifest.permission.POST_NOTIFICATIONS) });Text(tr("Supply notifications")) }
+    Row { Switch(alerts,{ alerts=it;vm.preference("supply_enabled",it.toString());if(it && android.os.Build.VERSION.SDK_INT>=33) permission.launch(android.Manifest.permission.POST_NOTIFICATIONS) },enabled=!busy,modifier=Modifier.semantics { contentDescription=tr("Supply notifications") });Text(tr("Supply notifications")) }
+    if(alerts && !androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) Text(tr("Notifications are off in system settings. Enable them to receive supply alerts."))
     Text(tr("After restore, notifications stay off until you enable them here."))
     Choice("Medication",state.medications.filter { it.active }.map { it.id.toString() to it.name },medId) { medId=it }
     if(med!=null) {
@@ -181,9 +182,10 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
         OutlinedTextField(threshold,{ threshold=it },label={ Text(tr("Low-stock threshold")) })
         OutlinedTextField(mapping,{ mapping=it },label={ Text(tr("Dose amount per package unit (optional)")) })
         Text(tr("Mapping uses the medication's logging unit. Leave blank to record stock units explicitly in each dose. No conversion is inferred."),style=MaterialTheme.typography.bodySmall)
-        Row { Checkbox(rx,{ rx=it });Text(tr("Prescription request reminder")) }
+        Row { Checkbox(rx,{ rx=it },Modifier.semantics { contentDescription=tr("Prescription request reminder") });Text(tr("Prescription request reminder")) }
         if(rx) TimeField("Prescription request date",rxDate) { rxDate=it }
         fun nonnegative(text: String)=text.replace(',','.').toDoubleOrNull()?.takeIf { it.isFinite() && it>=0 }
+        if(existing!=null) Button({ vm.supplySettings(existing.copy(unitLabel=unit.trim(),lowThreshold=nonnegative(threshold)!!,dosePerUnit=parseDose(mapping),doseUnit=med.unit,prescriptionDate=if(rx) rxDate else null,revision=existing.revision+1),close) },enabled=!busy && unit.isNotBlank() && nonnegative(threshold)!=null && (mapping.isBlank() || parseDose(mapping)!=null)) { Text(tr("Save settings without recounting")) }
         Button({ vm.supply(Supply(med.id,unit.trim(),System.currentTimeMillis(),nonnegative(threshold)!!,parseDose(mapping),med.unit,if(rx) rxDate else null,(existing?.revision ?: 0)+1),nonnegative(counted)!!,action,close) },enabled=!busy && unit.isNotBlank() && nonnegative(counted)!=null && nonnegative(threshold)!=null && (mapping.isBlank() || parseDose(mapping)!=null)) { Text(tr("Save count and settings")) }
         if(existing!=null) DeleteRecord { vm.removeSupply(med.id,close) }
     }

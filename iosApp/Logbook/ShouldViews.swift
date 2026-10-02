@@ -150,6 +150,7 @@ struct SupplyForm: View {
     var body: some View {
         Form {
             Toggle(l("Supply notifications"),isOn: Binding(get: { store.state.supplyNotificationsEnabled == true },set: { store.enableSupplyNotifications($0) }))
+            if store.state.supplyNotificationsEnabled == true && store.notificationsAllowed == false { Text(l("Notifications are off in system settings. Enable them to receive supply alerts.")) }
             Text(l("After restore, notifications stay off until you enable them here.")).font(.footnote)
             Picker(l("Medication"),selection: $medId) { Text(l("Choose medication")).tag(Int64(0));ForEach(store.state.document.medications.filter(\.active)) { Text($0.name).tag($0.id) } }
                 .onChange(of: medId) { _ in unit = existing?.unitLabel ?? "";count = "";threshold = existing.map { number($0.lowThreshold) } ?? "";mapping = existing?.dosePerUnit.map(number) ?? "";rx = existing?.prescriptionDate != nil;rxDate = existing?.prescriptionDate.map(date) ?? Date().addingTimeInterval(7*86400);action = UUID().uuidString }
@@ -158,7 +159,7 @@ struct SupplyForm: View {
                     Text(l("Estimated remaining: %s %s",number(balance.remaining),supply.unitLabel))
                     if balance.inconsistent { Text(l("Count may be incomplete. Review uncounted logs or recount.")) }
                     TextField(l("Restock units"),text: $restock).keyboardType(.decimalPad)
-                    Button(l("Add restock")) { store.attempt { try store.restock(medId,units: parseNumber(restock)!,action: action);restock = "";action = UUID().uuidString } }.disabled(parseNumber(restock) == nil)
+                    Button(l("Add restock")) { guard !store.busy,let amount = parseNumber(restock) else { return };let token = action,med = medId;store.attempt { try await store.restock(med,units: amount,action: token);restock = "";action = UUID().uuidString } }.disabled(store.busy || parseNumber(restock) == nil)
                 }
                 Text(l("Use a physical count. Package units are separate from the logged dose."))
                 TextField(l("Package unit label"),text: $unit)
@@ -168,14 +169,19 @@ struct SupplyForm: View {
                 Text(l("Mapping uses the medication's logging unit. Leave blank to record stock units explicitly in each dose. No conversion is inferred.")).font(.footnote)
                 Toggle(l("Prescription request reminder"),isOn: $rx)
                 if rx { DatePicker(l("Prescription request date"),selection: $rxDate,displayedComponents: [.date,.hourAndMinute]) }
-                Button(l("Save count and settings")) { if let med = store.state.document.medications.first(where: { $0.id == medId }) {
+                if let previous = existing { Button(l("Save settings without recounting")) {
+                    var next = previous;next.unitLabel = unit.trimmingCharacters(in: .whitespacesAndNewlines);next.lowThreshold = nonnegative(threshold)!;next.dosePerUnit = parseNumber(mapping);next.prescriptionDate = rx ? millis(rxDate) : nil;next.revision += 1
+                    store.attempt { try await store.updateSupply(next) }
+                }.disabled(unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || unit.count > 80 || nonnegative(threshold) == nil || (!mapping.isEmpty && parseNumber(mapping) == nil)) }
+                Button(l("Save count and settings")) { guard !store.busy,let amount = nonnegative(count) else { return };let token = action;if let med = store.state.document.medications.first(where: { $0.id == medId }) {
                     let value = SupplyValue(medicationId: med.id,unitLabel: unit,countedAt: millis(),lowThreshold: nonnegative(threshold)!,dosePerUnit: parseNumber(mapping),doseUnit: med.unit,prescriptionDate: rx ? millis(rxDate) : nil,revision: (existing?.revision ?? 0)+1)
-                    store.attempt { try store.saveSupply(value,count: nonnegative(count)!,action: action);count = "";action = UUID().uuidString }
+                    store.attempt { try await store.saveSupply(value,count: amount,action: token);count = "";action = UUID().uuidString }
                 } }.disabled(unit.trimmingCharacters(in: .whitespaces).isEmpty || unit.count > 80 || nonnegative(count) == nil || nonnegative(threshold) == nil || (!mapping.isEmpty && parseNumber(mapping) == nil))
                 if existing != nil { Button(l("Delete record"),role: .destructive) { deleting = true } }
             }
         }.navigationTitle(l("Supply"))
-            .confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try store.removeSupply(medId) } } }
+            .onAppear { unit = existing?.unitLabel ?? "";threshold = existing.map { number($0.lowThreshold) } ?? "";mapping = existing?.dosePerUnit.map(number) ?? "";rx = existing?.prescriptionDate != nil;rxDate = existing?.prescriptionDate.map(date) ?? Date().addingTimeInterval(7*86400) }
+            .confirmationDialog(l("Delete record?"),isPresented: $deleting,titleVisibility: .visible) { Button(l("Delete"),role: .destructive) { store.attempt { try await store.removeSupply(medId) } } }
     }
 }
 struct WidgetSettings: View {

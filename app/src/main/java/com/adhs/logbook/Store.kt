@@ -227,6 +227,11 @@ class Store(private val context: Context, private val name: String = "logbook.db
             stock=doc.stock+StockMovement(actionId,value.medicationId,"count",value.countedAt,counted)))
         validateRestore(next);writeShould(next)
     }
+    fun updateSupply(value: Supply) = transaction {
+        val doc=backup();val previous=doc.supplies.first { it.medicationId==value.medicationId }
+        val next=SupplyLedger.reconcile(doc.copy(supplies=doc.supplies.filterNot { it.medicationId==value.medicationId }+value.copy(countedAt=previous.countedAt)))
+        validateRestore(next);writeShould(next)
+    }
     fun restock(medicationId: Long,units: Double,actionId: String,now: Long=System.currentTimeMillis()) = transaction {
         require(units.isFinite() && units>0)
         val doc=backup();if(doc.stock.any { it.id==actionId }) return@transaction

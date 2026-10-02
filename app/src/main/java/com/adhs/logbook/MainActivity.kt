@@ -235,7 +235,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
                     if(active.isEmpty() || vm.enabled("measurements_enabled")) TextButton({ shouldPage="measurement:" }) { Text(tr("Add measurement")) }
                     state.supplies.filter { it.medicationId==selected?.id }.forEach { supply ->
                         val balance=SupplyLedger.balance(vm.document(),supply)
-                        if(balance.inconsistent || balance.remaining<=supply.lowThreshold || (supply.prescriptionDate?.let { it<=System.currentTimeMillis() }==true)) TextButton({ shouldPage="supply" }) { Text(tr("Estimated remaining: %s %s",doseText(balance.remaining),supply.unitLabel)) }
+                        if(balance.inconsistent || balance.remaining<=supply.lowThreshold || (supply.prescriptionDate?.let { it<=System.currentTimeMillis() }==true)) TextButton({ shouldPage="supply:${supply.medicationId}" }) { Text(tr("Estimated remaining: %s %s",doseText(balance.remaining),supply.unitLabel)) }
                     }
                     HomeScreen(state,selected,busy,{ selectedMedication = it },{ editingEntry = -1 },{
                     selected?.let { vm.quick(it,::saved) }

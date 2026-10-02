@@ -71,7 +71,7 @@ struct RootView: View {
                                 if store.state.document.preferences["observations_enabled"] == "true" { Button(l("Add observation")) { observation = blankObservation() } }
                                 if active.isEmpty || store.state.document.preferences["measurements_enabled"] == "true" { Button(l("Add measurement")) { measurement = blankMeasurement() } }
                                 if let med = medication, let supply = store.state.document.supplies.first(where: { $0.medicationId == med.id }), let balance = try? store.state.document.balance(med.id), balance.inconsistent || balance.remaining <= supply.lowThreshold || (supply.prescriptionDate ?? Int64.max) <= millis() {
-                                    NavigationLink(l("Estimated remaining: %s %s",number(balance.remaining),supply.unitLabel)) { SupplyForm() }
+                                    NavigationLink(l("Estimated remaining: %s %s",number(balance.remaining),supply.unitLabel)) { SupplyForm(medId: med.id) }
                                 }
                                 if active.count > 1 { Picker(l("Medication"), selection: Binding(get: { medication?.id ?? 0 }, set: { selected = $0 })) { ForEach(active) { Text($0.name).tag($0.id) } }.pickerStyle(.menu) }
                                 if let med = medication {

@@ -111,6 +111,9 @@ final class LogbookStore: NSObject, ObservableObject, UNUserNotificationCenterDe
             s.document.entries.removeAll { $0.id == value.id };s.document.entries.append(value)
             s.document.entries.sort { $0.timestamp == $1.timestamp ? $0.id > $1.id : $0.timestamp > $1.timestamp }
             s.actions[action] = value.id
+            for i in s.occurrences.indices where s.occurrences[i].entryId == value.id {
+                if let med = s.document.reminders.first(where: { $0.id == s.occurrences[i].reminderId })?.medicationId,med != value.medicationId { s.occurrences[i].state = "undone";s.occurrences[i].entryId = nil }
+            }
             if let occurrence, let index = s.occurrences.firstIndex(where: { $0.id == occurrence && $0.state == "pending" }),
                let reminder = s.document.reminders.first(where: { $0.id == s.occurrences[index].reminderId }),
                reminder.medicationId == nil || reminder.medicationId == value.medicationId,

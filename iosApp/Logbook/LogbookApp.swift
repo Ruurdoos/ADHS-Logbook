@@ -152,10 +152,11 @@ struct EstimateView: View {
 }
 struct MedicationForm: View {
     @EnvironmentObject var store: LogbookStore
+    @State private var discarding = false
     @Environment(\.dismiss) var dismiss
     @State var value: Med
     @State var dose = ""
-    @State var error = false
+    @State var error: String?
     var body: some View {
         NavigationStack {
             Form {
@@ -171,18 +172,21 @@ struct MedicationForm: View {
                 TextField(l("Your usual dose (%s)",l(value.unit)), text: $dose).keyboardType(.decimalPad)
                 Text(l("Enter your prescribed dose. You can add another medication later.")).font(.footnote)
                 if value.modelId == nil { Text(l("Logging is available. No supported estimate is available for this formulation.")).font(.footnote) }
-                if error { Text(l("Enter a positive dose.")).foregroundStyle(.red) }
+                if let error { Text(l(error)).foregroundStyle(.red).accessibilityAddTraits(.isStaticText) }
             }.navigationTitle(l(value.id == 0 ? "Add your medication" : "Edit medication"))
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) {
-                    guard let parsed = parseNumber(dose), !value.name.trimmingCharacters(in: .whitespaces).isEmpty else { error = true;return }
-                    value.usualDose = parsed;store.attempt { try store.save(value);dismiss() }
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { discarding = true } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) { guard !store.busy else { return };
+                    guard !value.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { error = "Enter a medication name.";return };guard value.name.count <= 200 && value.formulation.count <= 200 && value.strength.count <= 100 else { error = "Medication details are too long. Shorten the name, formulation or strength.";return };guard let parsed = parseNumber(dose) else { error = "Enter a positive dose.";return }
+                    value.usualDose = parsed;store.attempt { try await store.save(value);dismiss() }
                 } } }
-        }.onAppear { dose = value.usualDose > 0 ? number(value.usualDose) : "" }
+        }.disabled(store.busy).interactiveDismissDisabled()
+        .confirmationDialog(l("Discard changes?"),isPresented: $discarding,titleVisibility: .visible) { Button(l("Discard"),role: .destructive) { dismiss() };Button(l("Keep editing"),role: .cancel) {} }
+        .onAppear { dose = value.usualDose > 0 ? number(value.usualDose) : "" }
     }
 }
 struct EntryForm: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @EnvironmentObject var store: LogbookStore
+    @State private var discarding = false
     @Environment(\.dismiss) var dismiss
     @State var value: Entry
     let occurrence: String?
@@ -192,19 +196,24 @@ struct EntryForm: View {
     @State var time = Date()
     @State var useNow = true
     @State var optional = false
-    @State var error = false
+    @State var error: String?
     @State var confirmDelete = false
     @State var actionID = UUID().uuidString
+    @State private var snapshot: Entry?
     let moods = ["Very low","Low","Okay","Good","Very good"]
     var body: some View {
         NavigationStack {
             Form {
-                if value.id == 0 { Picker(l("Medication"), selection: $value.medicationId) { ForEach(store.state.document.medications.filter(\.active)) { Text($0.name).tag($0.id) } }.onChange(of: value.medicationId) { id in
-                    if let med = store.state.document.medications.first(where: { $0.id == id }) {
-                        value.preset = med.preset;value.medicationName = med.name;value.formulation = med.formulation;value.unit = med.unit;value.strength = med.strength;value.modelId = med.modelId;dose = number(med.usualDose)
+                Picker(l("Medication"), selection: $value.medicationId) { ForEach(store.state.document.medications.filter { $0.active || $0.id == value.medicationId }) { Text($0.name).tag($0.id) } }.onChange(of: value.medicationId) { id in
+                    if let original = snapshot,original.medicationId == id {
+                        value.preset = original.preset;value.medicationName = original.medicationName;value.formulation = original.formulation;value.unit = original.unit;value.strength = original.strength;value.modelId = original.modelId;dose = number(original.doseMg);supplyUnits = original.supplyUnits.map(number) ?? ""
+                    } else if let med = store.state.document.medications.first(where: { $0.id == id }) {
+                        value.preset = med.preset;value.medicationName = med.name;value.formulation = med.formulation;value.unit = med.unit;value.strength = med.strength;value.modelId = med.modelId;dose = value.id == 0 ? number(med.usualDose) : "";supplyUnits = ""
                     }
-                } } else { Text(value.medicationName) }
+                }
+                if value.id != 0 { Text(l("When changing medication, enter the amount again and check its unit.")) }
                 if value.id == 0 && typeSize.isAccessibilitySize { Text(value.medicationName) }
+                Text(l("Dose (%s)",l(value.unit))).font(.headline)
                 TextField(l("Dose (%s)",l(value.unit)), text: $dose).keyboardType(.decimalPad)
                 if store.state.document.supplies.contains(where: { $0.medicationId == value.medicationId }) {
                     TextField(l("Stock units used (optional)"),text: $supplyUnits).keyboardType(.decimalPad)
@@ -219,21 +228,23 @@ struct EntryForm: View {
                     ForEach(0..<5, id: \.self) { i in Button { value.mood = value.mood == i ? nil : i } label: { HStack { Text(l(moods[i]));Spacer();if value.mood == i { Image(systemName: "checkmark") } } }.accessibilityAddTraits(value.mood == i ? .isSelected : []) }
                 }
                 TextField(l("Notes (optional)"), text: $value.notes, axis: .vertical).lineLimit(3...8)
-                if error { Text(l("Enter a positive dose.")).foregroundStyle(.red) }
+                if let error { Text(l(error)).foregroundStyle(.red).accessibilityAddTraits(.isStaticText) }
                 if value.id != 0 { Button(l("Delete entry"), role: .destructive) { confirmDelete = true } }
             }.navigationTitle(l(value.id == 0 ? "Log dose" : "Edit entry"))
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { dismiss() } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) {
-                    guard let parsed = parseNumber(dose), value.notes.count <= 5000 else { error = true;return }
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { discarding = true } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) { guard !store.busy else { return };
+                    guard let parsed = parseNumber(dose) else { error = "Enter a positive dose.";return };guard value.notes.count <= 5000 else { error = "Notes must be 5,000 characters or fewer.";return }
                     let units = Double(supplyUnits.replacingOccurrences(of: ",",with: "."))
-                    guard supplyUnits.isEmpty || units.map({ $0.isFinite && $0 >= 0 }) == true else { error = true;return }
+                    guard supplyUnits.isEmpty || units.map({ $0.isFinite && $0 >= 0 }) == true else { error = "Enter zero or a positive stock amount.";return }
                     value.supplyUnits = units
                     let actual = useNow ? Date() : time;value.doseMg = parsed
                     if value.id == 0 || millis(time) != value.timestamp { value.timestamp = millis(actual);value.zoneId = TimeZone.current.identifier;value.offset = zoneOffset(actual) }
-                    store.attempt { try store.save(value, action: actionID, occurrence: occurrence);dismiss() }
+                    store.attempt { try await store.save(value, action: actionID, occurrence: occurrence);dismiss() }
                 } } }
-                .confirmationDialog(l("Delete this entry?"), isPresented: $confirmDelete, titleVisibility: .visible) { Button(l("Delete"), role: .destructive) { store.attempt { try store.delete(value.id);dismiss() } } } message: { Text(l("This removes the dose and its notes from your log. This cannot be undone.")) }
-        }.sheet(item: $nonUse,onDismiss: { if let occurrence, store.state.document.nonUse.contains(where: { $0.occurrenceId == occurrence }) { dismiss() } }) { NonUseForm(value: $0) }
-        .onAppear { supplyUnits = value.supplyUnits.map(number) ?? "";dose = number(value.doseMg);time = date(value.timestamp);useNow = value.id == 0;optional = value.mood != nil }
+                .confirmationDialog(l("Delete this entry?"), isPresented: $confirmDelete, titleVisibility: .visible) { Button(l("Delete"), role: .destructive) { store.attempt { try await store.delete(value.id);dismiss() } } } message: { Text(l("This removes the dose and its notes from your log. This cannot be undone.")) }
+        }.disabled(store.busy).interactiveDismissDisabled()
+        .confirmationDialog(l("Discard changes?"),isPresented: $discarding,titleVisibility: .visible) { Button(l("Discard"),role: .destructive) { dismiss() };Button(l("Keep editing"),role: .cancel) {} }
+        .sheet(item: $nonUse,onDismiss: { if let occurrence, store.state.document.nonUse.contains(where: { $0.occurrenceId == occurrence }) { dismiss() } }) { NonUseForm(value: $0) }
+        .onAppear { guard snapshot == nil else { return };snapshot = value;supplyUnits = value.supplyUnits.map(number) ?? "";dose = number(value.doseMg);time = date(value.timestamp);useNow = value.id == 0;optional = value.mood != nil }
     }
 }
 struct HistoryView: View {

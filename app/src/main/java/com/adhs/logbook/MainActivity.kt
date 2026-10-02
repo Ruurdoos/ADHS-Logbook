@@ -317,7 +317,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
             }
         }
         if(custom) {
-            OutlinedTextField(name,{ name=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Medication name")) },isError=attempted && name.isBlank())
+            OutlinedTextField(name,{ name=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Medication name")) },isError=attempted && name.isBlank(),supportingText={ if(attempted && name.isBlank()) Text(tr("Enter a medication name.")) })
             OutlinedTextField(formulation,{ formulation=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Formulation (optional)")) })
             OutlinedTextField(strength,{ strength=it.take(100) },Modifier.fillMaxWidth(),label={ Text(tr("Strength with unit (optional)")) },supportingText={ Text(tr("For your records only; no dose conversion.")) })
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { doseUnits.forEach { value -> FilterChip(selected=unit==value,onClick={ unit=value },label={ Text(tr(value)) }) } }

@@ -93,7 +93,13 @@ class Store(private val context: Context, private val name: String = "logbook.db
         val id=if(entry.id==0L) writableDatabase.insertOrThrow("entry",null,values) else entry.id.also {
             check(writableDatabase.update("entry",values,"id=?",arrayOf(it.toString()))==1)
         }
-        writableDatabase.execSQL("UPDATE entry SET details=? WHERE id=?",arrayOf<Any>(json.encodeToString(entry.copy(id=id)),id)); syncLedger(); id
+        writableDatabase.execSQL("UPDATE entry SET details=? WHERE id=?",arrayOf<Any>(json.encodeToString(entry.copy(id=id)),id))
+        val reminders=snapshot().reminders
+        occurrences().filter { it.entryId==id }.forEach { occurrence ->
+            val linkedMed=reminders.find { it.id==occurrence.reminderId }?.medicationId
+            if(linkedMed!=null && linkedMed!=entry.medicationId) putOccurrence(occurrence.copy(state="undone",entryId=null))
+        }
+        syncLedger(); id
     }
     override fun commit(entry: DoseEntry, actionId: String): Long = transaction {
         require(actionId.isNotBlank() && actionId.length <= 200)

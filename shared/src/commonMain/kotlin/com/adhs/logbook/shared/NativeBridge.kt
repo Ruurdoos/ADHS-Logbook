@@ -5,14 +5,18 @@ import kotlinx.serialization.decodeFromString
 
 /** Small JSON boundary keeps Swift independent of generated Kotlin collection/serializer types. */
 object NativeBridge {
+    fun validationIssue(document: String): String? = try { BackupFormat.decode(document); null }
+        catch(e: ValidationException) { e.message }
+        catch(e: Exception) { "Check the record fields and try again." }
+
     @Throws(IllegalArgumentException::class)
     fun canonicalBackup(document: String): String = BackupFormat.encode(BackupFormat.decode(document))
 
     @Throws(IllegalArgumentException::class)
     fun reconcile(document: String): String {
         val value=BackupFormat.json.decodeFromString<BackupDocument>(document)
-        require(value.version in 1..3)
-        return BackupFormat.encode(SupplyLedger.reconcile(value.copy(version=3)))
+        require(value.version in 1..4)
+        return BackupFormat.encode(SupplyLedger.reconcile(value.copy(version=4)))
     }
     @Throws(IllegalArgumentException::class)
     fun summary(document: String, boundaries: String): String = BackupFormat.json.encodeToString(SummaryBuilder.build(BackupFormat.decode(document),BackupFormat.json.decodeFromString<List<Long>>(boundaries)))

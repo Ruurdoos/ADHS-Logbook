@@ -74,7 +74,7 @@ object ReminderPolicy {
 }
 
 @Serializable
-data class BackupDocument(val version: Int = 3, val createdAt: Long,
+data class BackupDocument(val version: Int = 4, val createdAt: Long,
     val medications: List<Medication>, val entries: List<DoseEntry>, val reminders: List<Reminder>,
     val preferences: Map<String, String> = emptyMap(),
     val observations: List<Observation> = emptyList(), val nonUse: List<NonUse> = emptyList(),
@@ -84,9 +84,10 @@ object BackupFormat {
     fun encode(value: BackupDocument): String { validate(value); return json.encodeToString(value) }
     fun decode(value: String): BackupDocument = json.decodeFromString<BackupDocument>(value).also(::validate)
     fun validate(v: BackupDocument) {
-        require(v.version in 1..3 && v.createdAt >= 0)
+        require(v.version in 1..4 && v.createdAt >= 0)
         if(v.version==1) require(v.observations.isEmpty() && v.nonUse.isEmpty() && v.supplies.isEmpty() && v.stock.isEmpty() && !v.pause.paused)
         if(v.version<3) require(v.measurements.isEmpty())
+        if(v.version<4) require(v.nonUse.all { it.kind=="legacy" } && v.observations.all { it.scaleVersion==1 })
         require(v.measurements.size<=100000 && v.measurements.map { it.id }.distinct().size==v.measurements.size)
         v.measurements.forEach(MeasurementRules::validate)
         ShouldValidation.validate(v)

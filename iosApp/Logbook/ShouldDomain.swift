@@ -1,6 +1,12 @@
 import Foundation
 import LogbookShared
 
+func nonUseName(_ kind: String) -> String { ["scheduled":"Scheduled dose not taken","day":"No doses taken on this day","period":"No doses taken during this period"][kind] ?? "Not taken (original record)" }
+let sleepQualityLabels = ["Very poor","Poor","Fair","Good","Very good"]
+func ratingDescription(_ category: String,_ version: Int) -> String {
+    if category == "sleep" { return version == 2 ? "Sleep quality: 0 = very poor · 4 = very good" : "Original sleep scale: 0 = very low · 4 = very high" }
+    return ["focus":"Everyday functioning: 0 = very low · 4 = very high","mood":"Mood: 0 = very low · 4 = very high","appetite":"Appetite: 0 = very low · 4 = very high","symptom":"Symptom intensity: 0 = very low · 4 = very high","benefit":"Noticed benefit: 0 = very low · 4 = very high","fading":"Noticed fading: 0 = very low · 4 = very high"][category] ?? ""
+}
 let observationTypes = ["focus","mood","appetite","sleep","symptom","benefit","fading"]
 let observationResponses = ["rated","none","unsure","recorded"]
 func categoryName(_ key: String) -> String { ["focus":"Focus / everyday functioning","mood":"Mood","appetite":"Appetite","sleep":"Sleep","symptom":"Symptom / suspected side effect","benefit":"User-noticed benefit","fading":"User-noticed fading"][key] ?? key }
@@ -12,7 +18,10 @@ struct ObservationValue: Codable, Identifiable {
 }
 struct NonUseValue: Codable, Identifiable {
     var id = UUID().uuidString;var medicationId: Int64;var start: Int64;var end: Int64
-    var createdAt: Int64;var zoneId: String;var offset: String;var notes = "";var occurrenceId: String?
+    var createdAt: Int64;var zoneId: String;var offset: String;var notes = "";var occurrenceId: String?;var kind: String?
+    var recordKind: String { kind ?? "legacy" }
+    func contains(_ time: Int64) -> Bool { recordKind != "scheduled" && time >= start && (recordKind == "legacy" ? time <= end : time < end) }
+    func intersects(_ a: Int64,_ b: Int64) -> Bool { start < b && (["day","period"].contains(recordKind) ? end > a : end >= a) }
 }
 struct PauseValue: Codable { var paused = false;var until: Int64?;func active(_ now: Int64 = millis()) -> Bool { paused && (until == nil || now < until!) } }
 struct SupplyValue: Codable, Identifiable {

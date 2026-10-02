@@ -45,3 +45,27 @@ fun measurementText(m: Measurement)=tr(measurementName(m.kind))+": "+doseText(m.
     if(original!=null) TextButton({ confirm=true }) { Text(tr("Delete record")) }
     if(confirm) AlertDialog(onDismissRequest={ confirm=false },title={ Text(tr("Delete record?")) },confirmButton={ TextButton({ delete(id) }) { Text(tr("Delete")) } },dismissButton={ TextButton({ confirm=false }) { Text(tr("Cancel")) } })
 }
+fun weekStart(date: LocalDate)=date.with(WeekFields.of(Locale.getDefault()).dayOfWeek(),1)
+fun weekBounds(start: LocalDate,zone: ZoneId)= (0L..7L).map { start.plusDays(it).atStartOfDay(zone).toInstant().toEpochMilli() }
+@Composable fun WeeklyView(document: BackupDocument) {
+    var selected by rememberSaveable { mutableStateOf(weekStart(LocalDate.now()).toString()) }
+    val context=LocalContext.current;val zone=ZoneId.systemDefault();val start=LocalDate.parse(selected)
+    val week=WeeklyBuilder.build(document,weekBounds(start,zone))
+    Text(tr("Weekly overview"),style=MaterialTheme.typography.headlineSmall)
+    Text("$start – ${start.plusDays(6)} · ${zone.id}")
+    Row { TextButton({ selected=start.minusWeeks(1).toString() }) { Text(tr("Previous week")) };TextButton({ selected=start.plusWeeks(1).toString() }) { Text(tr("Next week")) } }
+    OutlinedButton({ android.app.DatePickerDialog(context,{ _,y,m,d -> selected=weekStart(LocalDate.of(y,m+1,d)).toString() },start.year,start.monthValue-1,start.dayOfMonth).show() }) { Text(tr("Choose week")) }
+    SummaryPreview(week.summary)
+    Text(tr("Observation distributions"),style=MaterialTheme.typography.titleMedium)
+    week.distributions.forEach { Text(tr(categoryName(it.category))+" · "+tr(responseName(it.response))+(it.value?.let { " $it / 4" } ?: "")+": ${it.count}") }
+    Text(tr("Legacy dose mood (separate from observations)"))
+    week.legacyMoods.forEach { Text(tr(moodLabels[it.value])+": ${it.count}") }
+    week.days.forEach { day ->
+        HorizontalDivider();Text(Instant.ofEpochMilli(day.start).atZone(zone).toLocalDate().toString(),style=MaterialTheme.typography.titleMedium)
+        if(day.doses.isEmpty() && day.observations.isEmpty() && day.measurements.isEmpty() && day.nonUse.isEmpty()) Text(tr("No records. Status unknown."))
+        day.doses.forEach { Text(Instant.ofEpochMilli(it.timestamp).atZone(zone).format(timeFormat(context))+" · ${it.medicationName} · ${it.formulation} · ${it.strength} · ${doseText(it.doseMg)} ${it.unit}");if(it.notes.isNotBlank()) Text(it.notes) }
+        day.observations.forEach { Text(Instant.ofEpochMilli(it.timestamp).atZone(zone).format(timeFormat(context))+" · "+tr(categoryName(it.category))+" · "+tr(responseName(it.response))+(it.value?.let { " $it / 4" } ?: ""));if(it.notes.isNotBlank()) Text(it.notes) }
+        day.measurements.forEach { Text(Instant.ofEpochMilli(it.timestamp).atZone(zone).format(timeFormat(context))+" · "+measurementText(it));if(it.notes.isNotBlank()) Text(it.notes) }
+        day.nonUse.forEach { Text(tr("Not taken")+" · "+(document.medications.find { med->med.id==it.medicationId }?.name ?: "")+" · "+Instant.ofEpochMilli(it.start).atZone(zone)+" – "+Instant.ofEpochMilli(it.end).atZone(zone));if(it.notes.isNotBlank()) Text(it.notes) }
+    }
+}

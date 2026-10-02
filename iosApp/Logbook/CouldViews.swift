@@ -49,3 +49,68 @@ struct MeasurementForm: View {
         }
     }
 }
+struct WeeklyView: View {
+    @EnvironmentObject var store: LogbookStore
+    @State var selected = Date()
+    var body: some View {
+        List {
+            DatePicker(l("Choose week"),selection: $selected,displayedComponents: .date)
+            HStack { Button(l("Previous week")) { selected = Calendar.current.date(byAdding: .day,value: -7,to: selected)! };Spacer();Button(l("Next week")) { selected = Calendar.current.date(byAdding: .day,value: 7,to: selected)! } }
+            if let week = try? store.state.document.weekly(selected) {
+                Text(date(week.days[0].start).formatted(date: .abbreviated,time: .omitted)+" – "+date(week.days[6].start).formatted(date: .abbreviated,time: .omitted)+" · "+TimeZone.current.identifier)
+                ForEach(Array(week.summary.lines.enumerated()),id: \.offset) { Text($0.element) }
+                WeeklyDetails(week: week, medications: store.state.document.medications)
+
+            }
+        }.navigationTitle(l("Weekly overview"))
+    }
+}
+private struct WeeklyDetails: View {
+    let week: WeeklyValue
+    let medications: [Med]
+    var body: some View {
+        Section(l("Observation distributions")) {
+            ForEach(Array(week.distributions.enumerated()),id: \.offset) { item in
+                Text(distributionText(item.element))
+            }
+        }
+        Section(l("Legacy dose mood (separate from observations)")) {
+            ForEach(week.legacyMoods,id: \.value) { mood in
+                Text(l(["Very low","Low","Okay","Good","Very good"][mood.value])+": \(mood.count)")
+            }
+        }
+        ForEach(week.days,id: \.start) { day in WeeklyDaySection(day: day,medications: medications) }
+    }
+    private func distributionText(_ d: DistributionValue) -> String {
+        let rating = d.value.map { " \($0) / 4" } ?? ""
+        return l(categoryName(d.category))+" · "+l(responseName(d.response))+rating+": \(d.count)"
+    }
+}
+private struct WeeklyDaySection: View {
+    let day: WeekDayValue
+    let medications: [Med]
+    var body: some View {
+        Section(date(day.start).formatted(date: .complete,time: .omitted)) {
+            if day.doses.isEmpty && day.observations.isEmpty && day.nonUse.isEmpty && day.measurements.isEmpty { Text(l("No records. Status unknown.")) }
+            ForEach(day.doses) { e in record(doseText(e),notes: e.notes) }
+            ForEach(day.observations) { o in record(observationText(o),notes: o.notes) }
+            ForEach(day.measurements) { m in record(time(m.timestamp)+" · "+measurementText(m),notes: m.notes) }
+            ForEach(day.nonUse) { n in
+                VStack(alignment: .leading) {
+                    Text(l("Not taken")+" · "+(medications.first { $0.id == n.medicationId }?.name ?? ""))
+                    Text(date(n.start).formatted()+" – "+date(n.end).formatted())
+                    if !n.notes.isEmpty { Text(n.notes) }
+                }
+            }
+        }
+    }
+    private func record(_ text: String,notes: String) -> some View {
+        VStack(alignment: .leading) { Text(text);if !notes.isEmpty { Text(notes) } }
+    }
+    private func time(_ timestamp: Int64) -> String { date(timestamp).formatted(date: .omitted,time: .shortened) }
+    private func doseText(_ e: Entry) -> String { [time(e.timestamp),e.medicationName,e.formulation,e.strength,number(e.doseMg)+" "+e.unit].joined(separator: " · ") }
+    private func observationText(_ o: ObservationValue) -> String {
+        let rating = o.value.map { " \($0) / 4" } ?? ""
+        return time(o.timestamp)+" · "+l(categoryName(o.category))+" · "+l(responseName(o.response))+rating
+    }
+}

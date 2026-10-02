@@ -67,7 +67,7 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
                 val id=mode.split(':')[1];val selectedMed=mode.substringAfterLast(':').toLongOrNull();val o=vm.occurrence(id);val r=state.reminders.find { it.id==o?.reminderId }
                 if(o!=null && r!=null && selectedMed!=null) {
                     val time=Instant.ofEpochMilli(o.scheduled).atZone(ZoneId.systemDefault())
-                    val value=state.nonUse.find { it.occurrenceId==id } ?: NonUse(UUID.randomUUID().toString(),r.medicationId ?: selectedMed,o.scheduled,o.scheduled,System.currentTimeMillis(),time.zone.id,time.offset.id,occurrenceId=id)
+                    val value=state.nonUse.find { it.occurrenceId==id } ?: NonUse(UUID.randomUUID().toString(),r.medicationId ?: selectedMed,o.scheduled,o.scheduled,System.currentTimeMillis(),time.zone.id,time.offset.id,occurrenceId=id,kind="scheduled")
                     NonUseEditor(value,state,busy,{ vm.nonUse(it,close) },{ vm.deleteNonUse(it,close) })
                 } else Text(tr("Choose a medication."))
             }
@@ -91,36 +91,46 @@ fun responseName(key: String)=when(key) { "rated"->"Rating";"none"->"None";"unsu
     Choice("Category",observationCategories.map { it to categoryName(it) },category) { category=it;response="";rating=-1 }
     Choice("Response",observationResponses.map { it to responseName(it) },response) { response=it }
     if(response=="rated") {
-        Text(tr("0 = very low · 4 = very high"))
-        Row { (0..4).forEach { value -> FilterChip(rating==value,{ rating=value },label={ Text(value.toString()) },modifier=Modifier.weight(1f)) } }
+        Text(tr(ratingDescription(category,if(category=="sleep" && original?.category!="sleep") 2 else original?.scaleVersion ?: 1)))
+        Row { (0..4).forEach { value -> FilterChip(rating==value,{ rating=value },label={ Text(value.toString()) },modifier=Modifier.weight(1f).semantics { contentDescription=if(category=="sleep" && (original==null || original.scaleVersion==2)) "$value: ${tr(sleepQualityLabels[value])}" else "$value: ${tr(categoryName(category))}" }) } }
     }
     TimeField("Observation time",time) { time=it }
-    if(category=="sleep") OutlinedTextField(sleep,{ sleep=it },label={ Text(tr("Night starting on (YYYY-MM-DD)")) })
+    if(category=="sleep") { val context=LocalContext.current;val day=runCatching { LocalDate.parse(sleep) }.getOrDefault(LocalDate.now().minusDays(1));Text(tr("Night starting on"));OutlinedButton({ DatePickerDialog(context,{ _,y,m,d -> sleep=LocalDate.of(y,m+1,d).toString() },day.year,day.monthValue-1,day.dayOfMonth).show() }) { Text(sleep) } }
     Choice("Optional dose link",listOf("" to "No dose link")+state.entries.map { it.id.toString() to "${it.medicationName} · ${Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()} · ${doseText(it.doseMg)} ${it.unit}" },link) { link=it }
     Text(tr("A link records your context, not medication causation."),style=MaterialTheme.typography.bodySmall)
     OutlinedTextField(notes,{ notes=it.take(5000) },label={ Text(tr("Notes (optional)")) },minLines=2)
     val valid=response.isNotEmpty() && (response!="rated" || rating>=0) && time<=System.currentTimeMillis() && (category!="sleep" || runCatching { LocalDate.parse(sleep) }.isSuccess)
-    Button({ val zone=Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault());save(Observation(id,category,response,if(response=="rated") rating else null,time,original?.createdAt ?: System.currentTimeMillis(),if(original?.timestamp==time) original.zoneId else zone.zone.id,if(original?.timestamp==time) original.offset else zone.offset.id,sleepDate=if(category=="sleep") sleep else null,doseId=link.toLongOrNull(),notes=notes)) },enabled=!busy && valid) { Text(tr("Save")) }
+    Button({ val zone=Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault());save(Observation(id,category,response,if(response=="rated") rating else null,time,original?.createdAt ?: System.currentTimeMillis(),if(original?.timestamp==time) original.zoneId else zone.zone.id,if(original?.timestamp==time) original.offset else zone.offset.id,scaleVersion=if(category=="sleep" && original?.category!="sleep") 2 else original?.scaleVersion ?: 1,sleepDate=if(category=="sleep") sleep else null,doseId=link.toLongOrNull(),notes=notes)) },enabled=!busy && valid) { Text(tr("Save")) }
     if(original!=null) DeleteRecord { delete(original.id) }
 }
 @Composable private fun NonUseEditor(original: NonUse?,state: LogbookState,busy: Boolean,save: (NonUse)->Unit,delete: (String)->Unit) {
     var med by rememberSaveable { mutableStateOf(original?.medicationId?.toString() ?: "") }
-    var start by rememberSaveable { mutableLongStateOf(original?.start ?: System.currentTimeMillis()) }
-    var end by rememberSaveable { mutableLongStateOf(original?.end ?: start) }
-    var period by rememberSaveable { mutableStateOf(original!=null && original.end>original.start) }
+    var start by rememberSaveable { mutableLongStateOf(original?.start ?: LocalDate.now().minusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()) }
+    var end by rememberSaveable { mutableLongStateOf(original?.end ?: System.currentTimeMillis()) }
+    var kind by rememberSaveable { mutableStateOf(original?.kind ?: "day") }
     var notes by rememberSaveable { mutableStateOf(original?.notes ?: "") }
     val id=rememberSaveable { original?.id ?: UUID.randomUUID().toString() }
+    val zone=Instant.ofEpochMilli(start).atZone(ZoneId.systemDefault())
+    val from=if(kind=="day") zone.toLocalDate().atStartOfDay(zone.zone).toInstant().toEpochMilli() else start
+    val until=when(kind) { "day"->zone.toLocalDate().plusDays(1).atStartOfDay(zone.zone).toInstant().toEpochMilli();"scheduled"->start;else->end }
     Text(tr("Record not taken"),style=MaterialTheme.typography.headlineSmall)
     Text(tr("Only record what you know. Pausing reminders does not record non-use."))
-    Choice("Medication",state.medications.map { it.id.toString() to it.name },med) { med=it }
-    TimeField("Start",start) { start=it }
-    Row { Checkbox(period,{ period=it;end=start });Text(tr("Record a period")) }
-    if(period) TimeField("End",end) { end=it }
+    if(original?.occurrenceId==null) Choice("Medication",state.medications.map { it.id.toString() to it.name },med) { med=it }
+    else Text(state.medications.find { it.id.toString()==med }?.name ?: "")
+    if(original==null) Choice("Record type",listOf("day" to nonUseName("day"),"period" to nonUseName("period")),kind) { kind=it }
+    else Text(tr(nonUseName(kind)))
+    if(kind=="day") {
+        Text(tr("Choose a completed day. For today, record a period ending now."))
+        val context=LocalContext.current
+        OutlinedButton({ DatePickerDialog(context,{ _,y,m,d -> start=LocalDate.of(y,m+1,d).atStartOfDay(zone.zone).toInstant().toEpochMilli() },zone.year,zone.monthValue-1,zone.dayOfMonth).show() }) { Text(zone.toLocalDate().toString()) }
+    } else if(kind=="scheduled") Text(zone.toString())
+    else { TimeField("Start",start) { start=it };TimeField("End",end) { end=it } }
     OutlinedTextField(notes,{ notes=it.take(5000) },label={ Text(tr("Notes (optional)")) })
-    val until=if(period) end else start
-    val overlap=state.entries.any { it.medicationId.toString()==med && it.timestamp in start..until }
+    val candidate=NonUse(id,med.toLongOrNull() ?: 0,from,until,original?.createdAt ?: System.currentTimeMillis(),if(original?.start==from) original.zoneId else zone.zone.id,if(original?.start==from) original.offset else zone.offset.id,notes,original?.occurrenceId,kind)
+    val overlap=state.entries.any { it.medicationId==candidate.medicationId && candidate.contains(it.timestamp) }
     if(overlap) Text(tr("A dose is recorded in this non-use period. Correct one record first."))
-    Button({ val zone=Instant.ofEpochMilli(start).atZone(ZoneId.systemDefault());save(NonUse(id,med.toLong(),start,until,original?.createdAt ?: System.currentTimeMillis(),if(original?.start==start) original.zoneId else zone.zone.id,if(original?.start==start) original.offset else zone.offset.id,notes,original?.occurrenceId)) },enabled=!busy && med.isNotBlank() && until>=start && until<=System.currentTimeMillis() && !overlap) { Text(tr("Save")) }
+    if(until>System.currentTimeMillis()) Text(tr("Choose a completed day or a period ending in the past."))
+    Button({ save(candidate) },enabled=!busy && med.isNotBlank() && until>=from && (kind!="period" || until>from) && until<=System.currentTimeMillis() && !overlap) { Text(tr("Save")) }
     if(original!=null && state.nonUse.any { it.id==original.id }) DeleteRecord { delete(original.id) }
 }
 @Composable private fun DeleteRecord(remove: ()->Unit) {

@@ -211,7 +211,7 @@ struct EntryForm: View {
                     Text(l("Only for supply tracking; separate from dose amount.")).font(.footnote)
                 }
                 if let occurrence, value.id == 0 {
-                    Button(l("Record not taken")) { var record = blankNonUse();record.medicationId = value.medicationId;record.occurrenceId = occurrence;nonUse = record }
+                    Button(l("Record not taken")) { var record = blankNonUse();record.medicationId = value.medicationId;record.occurrenceId = occurrence;record.kind = "scheduled";if let scheduled = store.state.occurrences.first(where: { $0.id == occurrence })?.scheduled { record.start = scheduled;record.end = scheduled;record.offset = zoneOffset(date(scheduled)) };nonUse = record }
                 }
                 if value.id == 0 { Toggle(l("Taken now"), isOn: $useNow) }
                 if !useNow { DatePicker(l("Time"), selection: $time, in: ...Date()) }

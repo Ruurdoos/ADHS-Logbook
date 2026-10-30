@@ -158,8 +158,10 @@ class LoggingFlowTest {
     }
 
     @Test fun medicationFreeOnboardingAndNestedObservationDraft() {
-        ui.waitUntil(10_000) { ui.onAllNodesWithText("Start without medication").fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithText("Start without medication").performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithText("Get started").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithText("Get started").performClick()
+        ui.onNodeWithText("No medication",useUnmergedTree=true).performScrollTo().performClick()
+        ui.onNodeWithText("Start",useUnmergedTree=true).performScrollTo().performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithText("Add observation").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithText("Add observation").performClick()
         ui.onAllNodesWithText("Response").onLast().performClick();ui.onNodeWithText("None").performClick()

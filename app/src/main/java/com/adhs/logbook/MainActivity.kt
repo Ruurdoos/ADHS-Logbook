@@ -215,10 +215,10 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
                         TextButton({ shouldPage="backup" }) { Text(tr("Restore backup")) }
                     }
                 }
-                !state.onboarded && welcome -> Welcome({ welcome=false },{ vm.startWithoutMedication() },{ shouldPage="backup" })
+                !state.onboarded && welcome -> Welcome({ welcome=false }) { BackupControls(vm,busy,restoreOnly=true) }
                 !state.onboarded || editingMedication != null -> MedicationEditor(
                     medication = state.medications.find { it.id == editingMedication }, busy = busy,
-                    onboarding = !state.onboarded,
+                    onboarding = !state.onboarded, onNoMedication = { vm.startWithoutMedication() },
                     onBack = { leaveEditor { if(state.onboarded) editingMedication = null else welcome = true } },
                     onSave = { med -> vm.medication(med) { editingMedication = null } },
                 )
@@ -231,15 +231,17 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
                     onDelete = { id -> vm.delete(id) { editingEntry = null; scope.launch { snackbar.showSnackbar(tr("Entry deleted")) } } },
                 ) }
                 tab == 0 -> Column {
-                    if(vm.observationsEnabled()) TextButton({ shouldPage="observation:" }) { Text(tr("Add observation")) }
-                    if(active.isEmpty() || vm.enabled("measurements_enabled")) TextButton({ shouldPage="measurement:" }) { Text(tr("Add measurement")) }
+                    if(active.isNotEmpty() && vm.observationsEnabled()) TextButton({ shouldPage="observation:" }) { Text(tr("Add observation")) }
+                    if(active.isNotEmpty() && vm.enabled("measurements_enabled")) TextButton({ shouldPage="measurement:" }) { Text(tr("Add measurement")) }
                     state.supplies.filter { it.medicationId==selected?.id }.forEach { supply ->
                         val balance=SupplyLedger.balance(vm.document(),supply)
                         if(balance.inconsistent || balance.remaining<=supply.lowThreshold || (supply.prescriptionDate?.let { it<=System.currentTimeMillis() }==true)) TextButton({ shouldPage="supply:${supply.medicationId}" }) { Text(tr("Estimated remaining: %s %s",doseText(balance.remaining),supply.unitLabel)) }
                     }
                     HomeScreen(state,selected,busy,{ selectedMedication = it },{ editingEntry = -1 },{
                     selected?.let { vm.quick(it,::saved) }
-                },{ editingMedication = -1 })
+                },{ editingMedication = -1 },
+                    onObservation=if(vm.observationsEnabled()) {{ shouldPage="observation:" }} else null,
+                    onMeasurement={ shouldPage="measurement:" })
                 }
                 tab == 1 -> Column {
                     if(vm.enabled("weekly_enabled")) TextButton({ shouldPage="weekly" }) { Text(tr("Weekly overview")) }
@@ -280,7 +282,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min=availableHeight).padding(24.dp),verticalArrangement=Arrangement.spacedBy(20.dp),content=content)
     }
 }
-@Composable private fun Welcome(onStart: () -> Unit,onSkip: ()->Unit,onRestore: ()->Unit) {
+@Composable private fun Welcome(onStart: () -> Unit,restore: @Composable () -> Unit) {
     ScrollPage {
         Spacer(Modifier.height(40.dp))
         Text(tr("ADHS LOGBOOK"),color=Sage,letterSpacing=2.sp,fontSize=12.sp,fontWeight=FontWeight.Bold)
@@ -288,13 +290,14 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         Text(tr("Log your medication. Keep notes when you want to."),color=Muted,fontSize=18.sp,lineHeight=28.sp)
         Spacer(Modifier.weight(1f))
         Note("Private. Stored on this device.")
-        Primary("Get started",onClick=onStart)
-        TextButton(onSkip) { Text(tr("Start without medication")) }
-        TextButton(onRestore) { Text(tr("Restore backup")) }
+        Column(horizontalAlignment=Alignment.CenterHorizontally) {
+            Primary("Get started",onClick=onStart)
+            restore()
+        }
     }
 }
 
-@Composable private fun MedicationEditor(medication: Medication?, busy: Boolean,onboarding: Boolean,onBack: () -> Unit,onSave: (Medication) -> Unit) {
+@Composable private fun MedicationEditor(medication: Medication?, busy: Boolean,onboarding: Boolean,onNoMedication: () -> Unit,onBack: () -> Unit,onSave: (Medication) -> Unit) {
     var presetName by rememberSaveable(medication?.id) { mutableStateOf((medication?.preset ?: Preset.METHYLPHENIDATE_IR).name) }
     var dose by rememberSaveable(medication?.id) { mutableStateOf(medication?.usualDose?.let(::doseText) ?: "") }
     var name by rememberSaveable(medication?.id) { mutableStateOf(medication?.name ?: "") }
@@ -302,42 +305,50 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
     var strength by rememberSaveable(medication?.id) { mutableStateOf(medication?.strength ?: "") }
     var unit by rememberSaveable(medication?.id) { mutableStateOf(medication?.unit ?: "mg") }
     var attempted by rememberSaveable { mutableStateOf(false) }
+    var noMedication by rememberSaveable { mutableStateOf(false) }
     val preset=Preset.valueOf(presetName);val parsed=parseDose(dose)
     val custom=preset==Preset.CUSTOM
     ScrollPage {
         BackTitle(if(medication == null) "Add your medication" else "Edit medication",onBack)
-        Preset.entries.forEach { item ->
-            val checked=item==preset
+        @Composable fun Option(title: String,checked: Boolean,select: () -> Unit) {
             Surface(color=if(checked) Pale else MaterialTheme.colorScheme.surface,shape=MaterialTheme.shapes.medium,
-                modifier=Modifier.fillMaxWidth().clickable { presetName=item.name;unit="mg" }) {
+                modifier=Modifier.fillMaxWidth().clickable(onClick=select)) {
                 Row(Modifier.padding(8.dp),verticalAlignment=Alignment.CenterVertically) {
-                    RadioButton(checked,{ presetName=item.name;unit="mg" },Modifier.semantics { contentDescription=tr(item.title) })
-                    Text(tr(item.title),Modifier.weight(1f).padding(end=8.dp))
+                    RadioButton(checked,select,Modifier.semantics { contentDescription=tr(title) })
+                    Text(tr(title),Modifier.weight(1f).padding(end=8.dp))
                 }
             }
         }
-        if(custom) {
-            OutlinedTextField(name,{ name=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Medication name")) },isError=attempted && name.isBlank(),supportingText={ if(attempted && name.isBlank()) Text(tr("Enter a medication name.")) })
-            OutlinedTextField(formulation,{ formulation=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Formulation (optional)")) })
-            OutlinedTextField(strength,{ strength=it.take(100) },Modifier.fillMaxWidth(),label={ Text(tr("Strength with unit (optional)")) },supportingText={ Text(tr("For your records only; no dose conversion.")) })
-            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { doseUnits.forEach { value -> FilterChip(selected=unit==value,onClick={ unit=value },label={ Text(tr(value)) }) } }
-        }
-        OutlinedTextField(dose,{ dose=it },Modifier.fillMaxWidth(),label={ Text(tr("Your usual dose (%s)",tr(unit))) },
-            keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),singleLine=true,
-            isError=attempted && parsed == null,supportingText={ if(attempted && parsed == null) Text(tr("Enter a positive dose.")) })
-        Note("Enter your prescribed dose. You can add another medication later.")
-        if(defaultModel(preset)==null) Note("Logging is available. No supported estimate is available for this formulation.")
-        Spacer(Modifier.weight(1f))
-        Primary(if(busy) "Saving…" else if(onboarding) "Start" else "Save medication",!busy) {
-            attempted=true
-            if(parsed!=null && (!custom || name.isNotBlank())) onSave(Medication(medication?.id ?: 0,preset,parsed,
-                name=if(custom) name.trim() else preset.title,formulation=if(custom) formulation.trim() else preset.name,
-                strength=if(custom) strength.trim() else "",unit=unit))
+        Preset.entries.forEach { item -> Option(item.title,!noMedication && item==preset) { presetName=item.name;unit="mg";noMedication=false } }
+        if(onboarding) Option("No medication",noMedication) { noMedication=true }
+        if(noMedication) {
+            Note("Log observations and measurements without medication. You can add a medication later.")
+            Spacer(Modifier.weight(1f))
+            Primary(if(busy) "Saving…" else "Start",!busy,onNoMedication)
+        } else {
+            if(custom) {
+                OutlinedTextField(name,{ name=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Medication name")) },isError=attempted && name.isBlank(),supportingText={ if(attempted && name.isBlank()) Text(tr("Enter a medication name.")) })
+                OutlinedTextField(formulation,{ formulation=it.take(200) },Modifier.fillMaxWidth(),label={ Text(tr("Formulation (optional)")) })
+                OutlinedTextField(strength,{ strength=it.take(100) },Modifier.fillMaxWidth(),label={ Text(tr("Strength with unit (optional)")) },supportingText={ Text(tr("For your records only; no dose conversion.")) })
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { doseUnits.forEach { value -> FilterChip(selected=unit==value,onClick={ unit=value },label={ Text(tr(value)) }) } }
+            }
+            OutlinedTextField(dose,{ dose=it },Modifier.fillMaxWidth(),label={ Text(tr("Your usual dose (%s)",tr(unit))) },
+                keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),singleLine=true,
+                isError=attempted && parsed == null,supportingText={ if(attempted && parsed == null) Text(tr("Enter a positive dose.")) })
+            Note("Enter your prescribed dose. You can add another medication later.")
+            if(defaultModel(preset)==null) Note("Logging is available. No supported estimate is available for this formulation.")
+            Spacer(Modifier.weight(1f))
+            Primary(if(busy) "Saving…" else if(onboarding) "Start" else "Save medication",!busy) {
+                attempted=true
+                if(parsed!=null && (!custom || name.isNotBlank())) onSave(Medication(medication?.id ?: 0,preset,parsed,
+                    name=if(custom) name.trim() else preset.title,formulation=if(custom) formulation.trim() else preset.name,
+                    strength=if(custom) strength.trim() else "",unit=unit))
+            }
         }
     }
 }
 
-@Composable private fun HomeScreen(state: LogbookState,selected: Medication?,busy: Boolean,onSelect: (Long) -> Unit,onLog: () -> Unit,onQuick: () -> Unit,onAdd: () -> Unit) {
+@Composable private fun HomeScreen(state: LogbookState,selected: Medication?,busy: Boolean,onSelect: (Long) -> Unit,onLog: () -> Unit,onQuick: () -> Unit,onAdd: () -> Unit,onObservation: (() -> Unit)?,onMeasurement: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while(true) { now=System.currentTimeMillis(); delay(30_000) } }
     val homeLifecycle=LocalLifecycleOwner.current.lifecycle
@@ -358,7 +369,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
                     Column(Modifier.padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                         Text(tr("Your log starts here."),fontSize=22.sp)
                         Note("Record observations and measurements, with or without medication.")
-                        Primary("Add medication",onClick=onAdd)
+                        OutlinedButton(onAdd,Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text(tr("Add medication")) }
                     }
                 }
             } else {
@@ -405,6 +416,11 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         if(selected != null) {
             Primary("＋ Log dose",!busy,onLog)
             TextButton(onQuick,Modifier.fillMaxWidth().heightIn(min=48.dp),enabled=!busy) { Text(tr("Log now · %s %s",doseText(selected.usualDose),tr(selected.unit))) }
+        } else if(onObservation != null) {
+            Primary("Add observation",!busy,onObservation)
+            TextButton(onMeasurement,Modifier.fillMaxWidth().heightIn(min=48.dp),enabled=!busy) { Text(tr("Add measurement")) }
+        } else {
+            Primary("Add measurement",!busy,onMeasurement)
         }
     }
     if(modelInfo) AlertDialog(onDismissRequest={ modelInfo=false },confirmButton={ TextButton({ modelInfo=false }) { Text(tr("Got it")) } },title={ Text(tr("About this estimate")) },text={

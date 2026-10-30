@@ -39,7 +39,7 @@ fun ReminderOptions(reminder: Reminder, medications: List<Medication>,dismiss: (
 }
 
 @Composable
-fun BackupControls(vm: LogbookViewModel,busy: Boolean) {
+fun BackupControls(vm: LogbookViewModel,busy: Boolean,restoreOnly: Boolean = false) {
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     // Passwords deliberately do not use saved instance state.
     var password by remember { mutableStateOf("") }
@@ -55,7 +55,10 @@ fun BackupControls(vm: LogbookViewModel,busy: Boolean) {
     val open=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         selectedUri=uri?.toString();dialog=if(uri==null) null else "restore"
     }
-    Column {
+    if(restoreOnly) {
+        TextButton({ open.launch(arrayOf("*/*")) },enabled=!busy && !working) { Text(tr("Restore backup")) }
+        if(working) LinearProgressIndicator()
+    } else Column {
         last?.let { Text(tr("Last backup: %s",runCatching { java.time.ZonedDateTime.parse(it).format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)) }.getOrDefault(it))) }
         TextButton({ create.launch("ADHS-logbook.adhsbak") },enabled=!busy && !working) { Text(tr("Create backup")) }
         TextButton({ open.launch(arrayOf("*/*")) },enabled=!busy && !working) { Text(tr("Restore backup")) }
@@ -79,7 +82,7 @@ fun BackupControls(vm: LogbookViewModel,busy: Boolean) {
         AlertDialog(onDismissRequest={ if(!busy) preview=null },title={ Text(tr("Replace current log?")) },text={
             Column { Text(tr("Medications: %d · Entries: %d",doc.medications.size,doc.entries.size));Text(range);Text(tr("Observations: %d · Measurements: %d · Non-use records: %d",doc.observations.size,doc.measurements.size,doc.nonUse.size))
                 Text(tr("This replaces the current log. A private pre-restore snapshot is kept on this device. Reminders stay off until you enable them.")) }
-        },confirmButton={ TextButton({ vm.restore(doc) { preview=null;message=tr("Backup restored. Reminders are off.") } },enabled=!busy) { Text(tr("Replace log")) } },dismissButton={ TextButton({ preview=null },enabled=!busy) { Text(tr("Cancel")) } })
+        },confirmButton={ TextButton({ vm.restore(doc) { preview=null;if(!restoreOnly) message=tr("Backup restored. Reminders are off.") } },enabled=!busy) { Text(tr("Replace log")) } },dismissButton={ TextButton({ preview=null },enabled=!busy) { Text(tr("Cancel")) } })
     }
     message?.let { text -> AlertDialog(onDismissRequest={ message=null },text={ Text(text) },confirmButton={ TextButton({ message=null }) { Text(tr("Close")) } }) }
 }

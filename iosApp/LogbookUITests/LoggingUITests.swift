@@ -12,7 +12,7 @@ final class LoggingUITests: XCTestCase {
             app.buttons["Get started"].tap()
             let dose = app.textFields["Your usual dose (mg)"]
             XCTAssertTrue(dose.waitForExistence(timeout: 5));dose.tap();dose.typeText("10")
-            app.buttons["Save"].tap()
+            app.buttons["Start"].tap()
         }
         let quick = app.buttons["Record 10 mg now"]
         XCTAssertTrue(quick.waitForExistence(timeout: 10));quick.tap()
@@ -38,7 +38,7 @@ final class LoggingUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication();app.launchArguments = ["-AppleLanguages","(en)","-AppleLocale","en_US"];app.launchArguments += ["--ui-test-data",fixtureID];app.launch()
         if app.buttons["Get started"].waitForExistence(timeout: 3) {
-            app.buttons["Get started"].tap();let dose = app.textFields["Your usual dose (mg)"];XCTAssertTrue(dose.waitForExistence(timeout: 5));dose.tap();dose.typeText("10");app.buttons["Save"].tap()
+            app.buttons["Get started"].tap();let dose = app.textFields["Your usual dose (mg)"];XCTAssertTrue(dose.waitForExistence(timeout: 5));dose.tap();dose.typeText("10");app.buttons["Start"].tap()
         }
         app.tabBars.buttons["History"].tap()
         app.buttons["Observations & non-use"].tap()
@@ -56,7 +56,7 @@ final class LoggingUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication();app.launchArguments = ["-AppleLanguages","(en)","-AppleLocale","en_US","-UIPreferredContentSizeCategoryName","UICTContentSizeCategoryL"];app.launchArguments += ["--ui-test-data",fixtureID];app.launch()
         if app.buttons["Get started"].waitForExistence(timeout: 3) {
-            app.buttons["Get started"].tap();let dose = app.textFields["Your usual dose (mg)"];XCTAssertTrue(dose.waitForExistence(timeout: 5));dose.tap();dose.typeText("10");app.buttons["Save"].tap()
+            app.buttons["Get started"].tap();let dose = app.textFields["Your usual dose (mg)"];XCTAssertTrue(dose.waitForExistence(timeout: 5));dose.tap();dose.typeText("10");app.buttons["Start"].tap()
         }
         app.tabBars.buttons["Settings"].tap()
         for label in ["Measurements","Weekly overview"] {
@@ -79,8 +79,12 @@ final class LoggingUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages","(en)","-AppleLocale","en_US","--ui-test-data",UUID().uuidString]
         app.launch()
-        XCTAssertTrue(app.buttons["Start without medication"].waitForExistence(timeout: 10))
-        app.buttons["Start without medication"].tap()
+        XCTAssertFalse(app.buttons["Start without medication"].exists)
+        XCTAssertTrue(app.buttons["Get started"].waitForExistence(timeout: 10))
+        app.buttons["Get started"].tap()
+        XCTAssertTrue(app.buttons["Medication, Methylphenidate IR"].waitForExistence(timeout: 5))
+        app.buttons["Medication, Methylphenidate IR"].tap();app.buttons["No medication"].tap()
+        app.buttons["Start"].tap()
         XCTAssertTrue(app.buttons["Add observation"].waitForExistence(timeout: 10))
         app.buttons["Add observation"].tap()
         app.buttons["Category, Focus / everyday functioning"].tap();app.buttons["Sleep"].tap()

@@ -61,6 +61,18 @@ struct RootView: View {
             }
         }.frame(maxWidth: .infinity).padding().background(.regularMaterial)
     }
+    var recordingActions: some View {
+        VStack {
+            if store.state.document.preferences["observations_enabled"] == "true" {
+                Button { observation = blankObservation() } label: { Text(l("Add observation")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity) }
+                    .buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground)).controlSize(.large)
+                Button(l("Add measurement")) { measurement = blankMeasurement() }.frame(minHeight: 44)
+            } else {
+                Button { measurement = blankMeasurement() } label: { Text(l("Add measurement")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity) }
+                    .buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground)).controlSize(.large)
+            }
+        }.frame(maxWidth: .infinity).padding().background(.regularMaterial)
+    }
     var body: some View {
         Group {
             if store.loading { ProgressView(l("Working…")) } else if !store.readable { VStack(spacing: 20) { Text(l("Your log could not be opened. Restore a backup to recover your records."));Button(l("Restore backup")) { restoring = true } } } else if store.state.document.preferences["onboarded"] != "true" {
@@ -68,17 +80,18 @@ struct RootView: View {
                     Text(l("A little clarity,\nevery day.")).font(.largeTitle.bold())
                     Text(l("Record observations and measurements, with or without medication."))
                     Spacer();Text(l("Private. Stored on this device.")).font(.footnote)
-                    Button { medEditor = blankMedication() } label: { Text(l("Get started")).fixedSize(horizontal: false,vertical: true) }.buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground)).controlSize(.large)
-                    Button(l("Start without medication")) { store.attempt { try await store.change { $0.document.preferences["onboarded"] = "true";$0.document.preferences["observations_enabled"] = "true";$0.document.preferences["measurements_enabled"] = "true" } } }
-                    Button(l("Restore backup")) { restoring = true }
+                    VStack(spacing: 8) {
+                        Button { medEditor = blankMedication() } label: { Text(l("Get started")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground)).controlSize(.large)
+                        RestoreBackupButton().frame(minHeight: 44)
+                    }
                 }.padding(24) }
             } else {
                 TabView(selection: $tab) {
                     NavigationStack {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 24) {
-                                if store.state.document.preferences["observations_enabled"] == "true" { Button(l("Add observation")) { observation = blankObservation() } }
-                                if active.isEmpty || store.state.document.preferences["measurements_enabled"] == "true" { Button(l("Add measurement")) { measurement = blankMeasurement() } }
+                                if medication != nil && store.state.document.preferences["observations_enabled"] == "true" { Button(l("Add observation")) { observation = blankObservation() } }
+                                if medication != nil && store.state.document.preferences["measurements_enabled"] == "true" { Button(l("Add measurement")) { measurement = blankMeasurement() } }
                                 if let med = medication, let supply = store.state.document.supplies.first(where: { $0.medicationId == med.id }), let balance = try? store.state.document.balance(med.id), balance.inconsistent || balance.remaining <= supply.lowThreshold || (supply.prescriptionDate ?? Int64.max) <= millis() {
                                     NavigationLink(l("Estimated remaining: %s %s",number(balance.remaining),supply.unitLabel)) { SupplyForm(medId: med.id) }
                                 }
@@ -97,12 +110,19 @@ struct RootView: View {
                                         if !store.state.document.entries.contains(where: { $0.medicationId == med.id && Calendar.current.isDateInToday(date($0.timestamp)) }) { Text(l("No dose logged today.")).foregroundStyle(.secondary) }
                                         EstimateView(med: med, document: store.state.document, revision: store.revision)
                                     }
-                                } else { Button(l("Add medication")) { medEditor = blankMedication() } }
+                                } else {
+                                    if typeSize.isAccessibilitySize { recordingActions }
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        Text(l("Your log starts here.")).font(.headline)
+                                        Text(l("Record observations and measurements, with or without medication.")).font(.footnote)
+                                        Button { medEditor = blankMedication() } label: { Text(l("Add medication")).frame(maxWidth: .infinity) }.buttonStyle(.bordered).controlSize(.large)
+                                    }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color(.secondarySystemGroupedBackground),in: RoundedRectangle(cornerRadius: 12))
+                                }
                             }.padding(24)
                         }.navigationTitle(l("Today"))
                             .safeAreaInset(edge: .bottom) {
-                                if let med = medication, !typeSize.isAccessibilitySize {
-                                    loggingActions(med)
+                                if !typeSize.isAccessibilitySize {
+                                    if let med = medication { loggingActions(med) } else { recordingActions }
                                 }
                             }
                     }.tabItem { Label(l("Home"), systemImage: "house") }.tag(0)
@@ -116,7 +136,7 @@ struct RootView: View {
         .sheet(isPresented: $restoring) { NavigationStack { BackupView().toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Close")) { restoring = false } } } } }
         .sheet(item: $measurement) { MeasurementForm(original: $0) }
         .sheet(item: $observation) { ObservationForm(value: $0) }
-        .sheet(item: $medEditor) { MedicationForm(value: $0) }
+        .sheet(item: $medEditor) { MedicationForm(value: $0, onboarding: store.state.document.preferences["onboarded"] != "true") }
         .sheet(item: $entryEditor) { EntryForm(value: $0, occurrence: linkedOccurrence) }
         .alert(l("Something went wrong"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button(l("Close")) { store.error = nil } } message: { Text(store.error ?? "") }
         .onChange(of: store.widgetReview) { id in
@@ -173,26 +193,36 @@ struct MedicationForm: View {
     @State private var discarding = false
     @Environment(\.dismiss) var dismiss
     @State var value: Med
+    var onboarding = false
     @State var dose = ""
     @State var error: String?
+    var noMedication: Bool { value.preset == "NONE" }
     var body: some View {
         NavigationStack {
             Form {
-                Picker(l("Medication"), selection: $value.preset) { ForEach(presetOrder, id: \.self) { Text(l(presetTitles[$0]!)).tag($0) } }
-                    .onChange(of: value.preset) { preset in value.name = preset == "CUSTOM" ? "" : presetTitles[preset]!;value.formulation = preset == "CUSTOM" ? "" : preset;value.modelId = model(preset);value.unit = "mg" }
-                if value.preset == "CUSTOM" {
-                    TextField(l("Medication name"), text: $value.name)
-                    TextField(l("Formulation (optional)"), text: $value.formulation)
-                    TextField(l("Strength with unit (optional)"), text: $value.strength)
-                    Text(l("For your records only; no dose conversion.")).font(.footnote)
-                    Picker(l("Dose"), selection: $value.unit) { ForEach(["mg","ml","unit"], id: \.self) { Text(l($0)).tag($0) } }
+                Picker(l("Medication"), selection: $value.preset) {
+                    ForEach(presetOrder, id: \.self) { Text(l(presetTitles[$0]!)).tag($0) }
+                    if onboarding { Text(l("No medication")).tag("NONE") }
                 }
-                TextField(l("Your usual dose (%s)",l(value.unit)), text: $dose).keyboardType(.decimalPad)
-                Text(l("Enter your prescribed dose. You can add another medication later.")).font(.footnote)
-                if value.modelId == nil { Text(l("Logging is available. No supported estimate is available for this formulation.")).font(.footnote) }
+                    .onChange(of: value.preset) { preset in guard preset != "NONE" else { error = nil;return };value.name = preset == "CUSTOM" ? "" : presetTitles[preset]!;value.formulation = preset == "CUSTOM" ? "" : preset;value.modelId = model(preset);value.unit = "mg" }
+                if noMedication {
+                    Text(l("Log observations and measurements without medication. You can add a medication later.")).font(.footnote)
+                } else {
+                    if value.preset == "CUSTOM" {
+                        TextField(l("Medication name"), text: $value.name)
+                        TextField(l("Formulation (optional)"), text: $value.formulation)
+                        TextField(l("Strength with unit (optional)"), text: $value.strength)
+                        Text(l("For your records only; no dose conversion.")).font(.footnote)
+                        Picker(l("Dose"), selection: $value.unit) { ForEach(["mg","ml","unit"], id: \.self) { Text(l($0)).tag($0) } }
+                    }
+                    TextField(l("Your usual dose (%s)",l(value.unit)), text: $dose).keyboardType(.decimalPad)
+                    Text(l("Enter your prescribed dose. You can add another medication later.")).font(.footnote)
+                    if value.modelId == nil { Text(l("Logging is available. No supported estimate is available for this formulation.")).font(.footnote) }
+                }
                 if let error { Text(l(error)).foregroundStyle(.red).accessibilityAddTraits(.isStaticText) }
             }.navigationTitle(l(value.id == 0 ? "Add your medication" : "Edit medication"))
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { discarding = true } };ToolbarItem(placement: .confirmationAction) { Button(l("Save")) { guard !store.busy else { return };
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { discarding = true } };ToolbarItem(placement: .confirmationAction) { Button(l(onboarding ? "Start" : "Save")) { guard !store.busy else { return }
+                    if noMedication { store.attempt { try await store.change { $0.document.preferences["onboarded"] = "true";$0.document.preferences["observations_enabled"] = "true";$0.document.preferences["measurements_enabled"] = "true" };dismiss() };return }
                     guard !value.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { error = "Enter a medication name.";return };guard value.name.count <= 200 && value.formulation.count <= 200 && value.strength.count <= 100 else { error = "Medication details are too long. Shorten the name, formulation or strength.";return };guard let parsed = parseNumber(dose) else { error = "Enter a positive dose.";return }
                     value.usualDose = parsed;store.attempt { try await store.save(value);dismiss() }
                 } } }

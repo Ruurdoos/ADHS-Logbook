@@ -146,3 +146,59 @@ struct BackupView: View {
     }
     func backupRange(_ doc: Document) -> String { guard let min = doc.entries.map(\.timestamp).min(), let max = doc.entries.map(\.timestamp).max() else { return l("No entries") };return date(min).formatted(date: .abbreviated,time: .omitted)+" – "+date(max).formatted(date: .abbreviated,time: .omitted) }
 }
+struct RestoreBackupButton: View {
+    @EnvironmentObject var store: LogbookStore
+    @State var importing = false
+    @State var fileData: Data?
+    @State var password = ""
+    @State var working = false
+    @State var preview: Document?
+    @State var showConfirm = false
+    @State var message: String?
+    @State var failed = false
+    var body: some View {
+        Button(l("Restore backup")) { failed = false;importing = true }.disabled(working)
+            .fileImporter(isPresented: $importing,allowedContentTypes: [.data],allowsMultipleSelection: false) { result in
+                do {
+                    guard let url = try result.get().first else { return }
+                    let access = url.startAccessingSecurityScopedResource();defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    guard let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= BackupCipher.limit else { throw AppError.invalid }
+                    fileData = try Data(contentsOf: url)
+                } catch { message = l("Cannot open backup. Check the passphrase and file. Your log was not changed.") }
+            }
+            .sheet(isPresented: Binding(get: { fileData != nil },set: { if !$0 { fileData = nil;password = "" } }),onDismiss: { if preview != nil { showConfirm = true } }) {
+                NavigationStack {
+                    Form {
+                        Text(l("Enter the passphrase for this backup."))
+                        SecureField(l("Passphrase"),text: $password).textContentType(.password)
+                        if failed { Text(l("Cannot open backup. Check the passphrase and file. Your log was not changed.")).foregroundStyle(.red) }
+                        if working { ProgressView(l("Working…")) }
+                    }.navigationTitle(l("Restore backup")).navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button(l("Cancel")) { fileData = nil;password = "" } }
+                            ToolbarItem(placement: .confirmationAction) { Button(l("Restore backup")) { decrypt() }.disabled(working || password.utf16.count < 10) }
+                        }
+                }.presentationDetents([.medium]).interactiveDismissDisabled(working)
+            }
+            .alert(l("Replace current log?"),isPresented: $showConfirm) {
+                Button(l("Replace log"),role: .destructive) { if let doc = preview { store.attempt { try await store.restore(doc) } };preview = nil }
+                Button(l("Cancel"),role: .cancel) { preview = nil }
+            } message: {
+                if let doc = preview {
+                    Text(l("Medications: %d · Entries: %d",doc.medications.count,doc.entries.count)+"\n"+l("Observations: %d · Measurements: %d · Non-use: %d",doc.observations.count,doc.measurements.count,doc.nonUse.count)+"\n"+l("This replaces the current log. A private pre-restore snapshot is kept on this device. Reminders stay off until you enable them."))
+                }
+            }
+            .alert(message ?? "",isPresented: Binding(get: { message != nil },set: { if !$0 { message = nil } })) { Button(l("Close")) { message = nil } }
+    }
+    func decrypt() {
+        guard let data = fileData else { return }
+        let secret = password;password = "";working = true
+        Task {
+            do {
+                let doc = try await Task.detached { try BackupCipher.decrypt(data,password: secret) }.value
+                preview = doc;fileData = nil
+            } catch { failed = true }
+            working = false
+        }
+    }
+}

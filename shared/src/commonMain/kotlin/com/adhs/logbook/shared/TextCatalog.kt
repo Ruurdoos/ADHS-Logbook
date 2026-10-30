@@ -325,6 +325,9 @@ object TextCatalog {
     }
     private val additions = mapOf(
         "Start without medication" to "Ohne Medikament beginnen",
+        "No medication" to "Kein Medikament",
+        "Log observations and measurements without medication. You can add a medication later." to "Erfasse Beobachtungen und Messwerte ohne Medikament. Du kannst später ein Medikament hinzufügen.",
+        "Enter the passphrase for this backup." to "Gib die Passphrase für dieses Backup ein.",
         "Record observations and measurements, with or without medication." to "Erfasse Beobachtungen und Messwerte, mit oder ohne Medikament.",
         "Your log could not be opened. Restore a backup to recover your records." to "Dein Protokoll konnte nicht geöffnet werden. Stelle deine Aufzeichnungen aus einem Backup wieder her.",
         "Sleep quality: 0 = very poor · 4 = very good" to "Schlafqualität: 0 = sehr schlecht · 4 = sehr gut",

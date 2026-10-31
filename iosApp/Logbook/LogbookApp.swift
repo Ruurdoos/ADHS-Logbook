@@ -64,6 +64,22 @@ struct RootView: View {
             }
         }.frame(maxWidth: .infinity).padding().background(.regularMaterial)
     }
+    @ViewBuilder var recordShortcut: some View {
+        let observations = store.state.document.preferences["observations_enabled"] == "true"
+        let measurements = store.state.document.preferences["measurements_enabled"] == "true"
+        if medication != nil {
+            if observations && measurements {
+                Menu {
+                    Button { observation = blankObservation() } label: { Label(l("Add observation"),systemImage: "square.and.pencil") }
+                    Button { measurement = blankMeasurement() } label: { Label(l("Add measurement"),systemImage: "waveform.path.ecg") }
+                } label: { Image(systemName: "plus.circle.fill").font(.title2) }.accessibilityLabel(l("Add observation or measurement"))
+            } else if observations {
+                Button { observation = blankObservation() } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(l("Add observation"))
+            } else if measurements {
+                Button { measurement = blankMeasurement() } label: { Image(systemName: "waveform.path.ecg") }.accessibilityLabel(l("Add measurement"))
+            }
+        }
+    }
     var recordingActions: some View {
         VStack {
             if store.state.document.preferences["observations_enabled"] == "true" {
@@ -93,8 +109,6 @@ struct RootView: View {
                     NavigationStack {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 24) {
-                                if medication != nil && store.state.document.preferences["observations_enabled"] == "true" { Button(l("Add observation")) { observation = blankObservation() } }
-                                if medication != nil && store.state.document.preferences["measurements_enabled"] == "true" { Button(l("Add measurement")) { measurement = blankMeasurement() } }
                                 if let med = medication, let supply = store.state.document.supplies.first(where: { $0.medicationId == med.id }), let balance = try? store.state.document.balance(med.id), balance.inconsistent || balance.remaining <= supply.lowThreshold || (supply.prescriptionDate ?? Int64.max) <= millis() {
                                     NavigationLink(l("Estimated remaining: %s %s",number(balance.remaining),supply.unitLabel)) { SupplyForm(medId: med.id) }
                                 }
@@ -123,6 +137,7 @@ struct RootView: View {
                                 }
                             }.padding(24)
                         }.navigationTitle(l("Today"))
+                            .toolbar { ToolbarItem(placement: .primaryAction) { recordShortcut } }
                             .safeAreaInset(edge: .bottom) {
                                 if !typeSize.isAccessibilitySize {
                                     if let med = medication { loggingActions(med) } else { recordingActions }

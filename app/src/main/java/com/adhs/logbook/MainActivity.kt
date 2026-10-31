@@ -14,6 +14,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -232,8 +239,6 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
                     onDelete = { id -> vm.delete(id) { editingEntry = null; scope.launch { snackbar.showSnackbar(tr("Entry deleted")) } } },
                 ) }
                 tab == 0 -> Column {
-                    if(active.isNotEmpty() && vm.observationsEnabled()) TextButton({ shouldPage="observation:" }) { Text(tr("Add observation")) }
-                    if(active.isNotEmpty() && vm.enabled("measurements_enabled")) TextButton({ shouldPage="measurement:" }) { Text(tr("Add measurement")) }
                     state.supplies.filter { it.medicationId==selected?.id }.forEach { supply ->
                         val balance=SupplyLedger.balance(vm.document(),supply)
                         if(balance.inconsistent || balance.remaining<=supply.lowThreshold || (supply.prescriptionDate?.let { it<=System.currentTimeMillis() }==true)) TextButton({ shouldPage="supply:${supply.medicationId}" }) { Text(tr("Estimated remaining: %s %s",doseText(balance.remaining),supply.unitLabel)) }
@@ -242,7 +247,8 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
                     selected?.let { vm.quick(it,::saved) }
                 },{ editingMedication = -1 },
                     onObservation=if(vm.observationsEnabled()) {{ shouldPage="observation:" }} else null,
-                    onMeasurement={ shouldPage="measurement:" })
+                    onMeasurement={ shouldPage="measurement:" },
+                    measurementsEnabled=vm.enabled("measurements_enabled"))
                 }
                 tab == 1 -> Column {
                     if(vm.enabled("weekly_enabled")) TextButton({ shouldPage="weekly" }) { Text(tr("Weekly overview")) }
@@ -361,7 +367,7 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
     }
 }
 
-@Composable private fun HomeScreen(state: LogbookState,selected: Medication?,busy: Boolean,onSelect: (Long) -> Unit,onLog: () -> Unit,onQuick: () -> Unit,onAdd: () -> Unit,onObservation: (() -> Unit)?,onMeasurement: () -> Unit) {
+@Composable private fun HomeScreen(state: LogbookState,selected: Medication?,busy: Boolean,onSelect: (Long) -> Unit,onLog: () -> Unit,onQuick: () -> Unit,onAdd: () -> Unit,onObservation: (() -> Unit)?,onMeasurement: () -> Unit,measurementsEnabled: Boolean = false) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while(true) { now=System.currentTimeMillis(); delay(30_000) } }
     val homeLifecycle=LocalLifecycleOwner.current.lifecycle
@@ -374,8 +380,14 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
     var modelInfo by remember { mutableStateOf(false) }
     val zone = ZoneId.systemDefault()
     val relevant = state.entries.filter { it.medicationId == selected?.id }
+    val recordActions=if(selected==null) emptyList() else listOfNotNull(
+        onObservation?.let { RecordAction("Add observation",Icons.Outlined.EditNote,it) },
+        if(measurementsEnabled) RecordAction("Add measurement",Icons.Outlined.MonitorHeart,onMeasurement) else null,
+    )
+    var recordMenu by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(horizontal=24.dp)) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top=24.dp),verticalArrangement=Arrangement.spacedBy(24.dp)) {
+      Box(Modifier.weight(1f)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top=24.dp),verticalArrangement=Arrangement.spacedBy(24.dp)) {
             Title("Today",Instant.ofEpochMilli(now).atZone(zone).format(dayFormat))
             if(selected == null) {
                 Surface(color=MaterialTheme.colorScheme.surface,shape=MaterialTheme.shapes.large) {
@@ -425,7 +437,10 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
                 }
                 Spacer(Modifier.height(8.dp))
             }
+            if(recordActions.isNotEmpty()) Spacer(Modifier.height(56.dp))
         }
+        if(recordActions.isNotEmpty()) RecordFab(recordActions,recordMenu,{ recordMenu=it },Modifier.align(Alignment.BottomEnd).padding(bottom=16.dp))
+      }
         if(selected != null) {
             Secondary("＋ Log dose",!busy,onLog)
             Spacer(Modifier.height(12.dp))
@@ -445,6 +460,36 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
             Text(tr("Sources: DailyMed Ritalin, Ritalin LA (IR comparison) and Vyvanse capsule labels. Models: ritalin-ir-v1 / vyvanse-capsule-v1. Engine: relative-heuristic-v1."))
         }
     })
+}
+
+internal class RecordAction(val label: String,val icon: androidx.compose.ui.graphics.vector.ImageVector,val onClick: () -> Unit)
+
+/** Floating entry point for optional records: opens the single action directly, or a labelled menu when several are enabled. */
+@Composable internal fun BoxScope.RecordFab(actions: List<RecordAction>,expanded: Boolean,onExpanded: (Boolean) -> Unit,modifier: Modifier) {
+    val single=actions.singleOrNull()
+    if(single!=null) {
+        FloatingActionButton(single.onClick,modifier,containerColor=Pale,contentColor=Sage) { Icon(single.icon,tr(single.label)) }
+        return
+    }
+    BackHandler(expanded) { onExpanded(false) }
+    AnimatedVisibility(expanded,Modifier.matchParentSize(),enter=fadeIn(),exit=fadeOut()) {
+        Box(Modifier.fillMaxSize().background(Paper.copy(alpha=0.85f)).clickable(interactionSource=null,indication=null,onClickLabel=tr("Close")) { onExpanded(false) })
+    }
+    Column(modifier,horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(12.dp)) {
+        AnimatedVisibility(expanded,enter=fadeIn()+expandVertically(expandFrom=Alignment.Bottom),exit=fadeOut()+shrinkVertically(shrinkTowards=Alignment.Bottom)) {
+            Column(horizontalAlignment=Alignment.End,verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                actions.forEach { action ->
+                    ExtendedFloatingActionButton({ onExpanded(false);action.onClick() },containerColor=MaterialTheme.colorScheme.surface,contentColor=Sage) {
+                        Icon(action.icon,null);Spacer(Modifier.width(12.dp));Text(tr(action.label))
+                    }
+                }
+            }
+        }
+        val rotation by animateFloatAsState(if(expanded) 45f else 0f,label="record-fab")
+        FloatingActionButton({ onExpanded(!expanded) },containerColor=Pale,contentColor=Sage) {
+            Icon(Icons.Outlined.Add,tr(if(expanded) "Close" else "Add observation or measurement"),Modifier.rotate(rotation))
+        }
+    }
 }
 
 @Composable private fun LevelChart(entries: List<DoseEntry>,preset: Preset,now: Long) {

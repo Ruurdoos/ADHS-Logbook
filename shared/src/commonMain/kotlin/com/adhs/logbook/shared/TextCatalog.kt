@@ -65,6 +65,7 @@ object TextCatalog {
         "Observations" to "Beobachtungen",
         "Observations & non-use" to "Beobachtungen und Nichteinnahme",
         "Add observation" to "Beobachtung hinzufügen",
+        "Add observation or measurement" to "Beobachtung oder Messwert hinzufügen",
         "Edit observation" to "Beobachtung bearbeiten",
         "Focus / everyday functioning" to "Fokus / Alltag",
         "Appetite" to "Appetit",

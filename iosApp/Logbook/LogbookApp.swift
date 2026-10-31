@@ -51,11 +51,14 @@ struct RootView: View {
     func loggingActions(_ med: Med) -> some View {
         VStack {
             Button { linkedOccurrence = nil;entryEditor = newEntry(med) } label: {
-                Text(l("Log dose")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity)
-            }.buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground)).controlSize(.large)
-            Button(l("Log now · %s %s", number(med.usualDose), l(med.unit))) {
+                Text(l("Log dose")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity).padding(.vertical,14)
+                    .overlay(Capsule().strokeBorder(Color.accentColor,lineWidth: 2)).contentShape(Capsule())
+            }.buttonStyle(.plain).foregroundStyle(Color.accentColor).font(.body.weight(.semibold))
+            Button {
                 guard !store.busy else { return };store.attempt { try await store.quick(med) }
-            }.frame(minHeight: 44)
+            } label: {
+                Text(l("Log now · %s %s", number(med.usualDose), l(med.unit))).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity)
+            }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).foregroundStyle(Color(.systemBackground)).controlSize(.large)
             if let id = store.undoID {
                 Button(l("Dose logged")+" · "+l("Undo")) { store.attempt { try await store.delete(id) } }.frame(minHeight: 44)
             }

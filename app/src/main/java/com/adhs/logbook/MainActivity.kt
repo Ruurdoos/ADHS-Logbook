@@ -270,6 +270,12 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
         Text(tr(text),fontSize=16.sp,modifier=Modifier.padding(vertical=6.dp))
     }
 }
+@Composable private fun Secondary(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    OutlinedButton(onClick,Modifier.fillMaxWidth().heightIn(min=56.dp),enabled=enabled,shape=MaterialTheme.shapes.large,
+        border=androidx.compose.foundation.BorderStroke(2.dp,if(enabled) Sage else Sage.copy(alpha=0.38f)),colors=ButtonDefaults.outlinedButtonColors(contentColor=Sage)) {
+        Text(tr(text),fontSize=16.sp,modifier=Modifier.padding(vertical=6.dp))
+    }
+}
 @Composable private fun CheckboxRow(text: String,checked: Boolean,onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min=48.dp).toggleable(checked,role=androidx.compose.ui.semantics.Role.Checkbox,onValueChange=onChange),verticalAlignment=Alignment.CenterVertically) {
         Checkbox(checked,null,Modifier.padding(12.dp))
@@ -421,8 +427,10 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
             }
         }
         if(selected != null) {
-            Primary("＋ Log dose",!busy,onLog)
-            TextButton(onQuick,Modifier.fillMaxWidth().heightIn(min=48.dp),enabled=!busy) { Text(tr("Log now · %s %s",doseText(selected.usualDose),tr(selected.unit))) }
+            Secondary("＋ Log dose",!busy,onLog)
+            Spacer(Modifier.height(12.dp))
+            Primary(tr("Log now · %s %s",doseText(selected.usualDose),tr(selected.unit)),!busy,onQuick)
+            Spacer(Modifier.height(8.dp))
         } else if(onObservation != null) {
             Primary("Add observation",!busy,onObservation)
             TextButton(onMeasurement,Modifier.fillMaxWidth().heightIn(min=48.dp),enabled=!busy) { Text(tr("Add measurement")) }

@@ -689,61 +689,88 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
         onDispose { lifecycle.removeObserver(observer) }
     }
     val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> denied=!granted; vm.reminders(true) }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal=24.dp),contentPadding=PaddingValues(vertical=24.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+    val is24h=android.text.format.DateFormat.is24HourFormat(context)
+    val paused=state.pause.active(System.currentTimeMillis())
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal=24.dp),contentPadding=PaddingValues(vertical=24.dp),verticalArrangement=Arrangement.spacedBy(24.dp)) {
         item { Title("Settings") }
-        item { Text(tr("Medications"),fontWeight=FontWeight.SemiBold,fontSize=20.sp) }
-        items(state.medications.filter { it.active },key={ "med-${it.id}" }) { med ->
-            Row(verticalAlignment=Alignment.CenterVertically) {
-                Column(Modifier.weight(1f).clickable { onMedication(med.id) }.padding(vertical=12.dp)) { Text(med.name); Note(tr("Usual dose · %s %s",doseText(med.usualDose),tr(med.unit))) }
-                IconButton({ onMedication(med.id) },enabled=!busy) { Icon(Icons.Outlined.Edit,tr("Edit %s",med.name)) }
-                IconButton({ remove=med },enabled=!busy) { Icon(Icons.Outlined.Close,tr("Remove %s",med.name)) }
-            }
-        }
-        item { TextButton({ archived=!archived }) { Text(tr("Archived medications")) } }
-        if(archived) {
-            if(state.medications.none { !it.active }) item { Text(tr("No archived medications.")) }
-            items(state.medications.filter { !it.active },key={ "archived-${it.id}" }) { med -> Row {
-                Text(med.name,Modifier.weight(1f));TextButton({ vm.medication(med.copy(active=true)) {} },enabled=!busy) { Text(tr("Reactivate")) }
-            } }
-        }
-        item { TextButton({ onMedication(-1) },enabled=!busy) { Text(tr("＋ Add medication")) }; HorizontalDivider() }
         item {
-            Row(verticalAlignment=Alignment.CenterVertically) {
-                Text(tr("Reminders"),fontSize=20.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.weight(1f))
-                Switch(state.remindersEnabled,{ enabled ->
-                    if(enabled && Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    else { denied=!NotificationManagerCompat.from(context).areNotificationsEnabled(); vm.reminders(enabled) }
-                },enabled=!busy,modifier=Modifier.semantics { contentDescription=tr("Reminders") })
-            }
-            Note("A gentle reminder to log. Delivery may be delayed by battery settings.")
-        }
-        if(state.remindersEnabled) {
-            item { Note(when { denied -> "Notifications are turned off. Your reminder times are saved.";state.pause.active(System.currentTimeMillis()) -> "Reminders are paused.";state.reminders.isEmpty() -> "No reminder times. Add a time to receive reminders.";else -> "Reminders are scheduled." }) }
-            items(state.reminders,key={ "reminder-${it.id}" }) { reminder ->
-                Row(verticalAlignment=Alignment.CenterVertically) {
-                    OutlinedButton({ TimePickerDialog(context,{ _,h,m -> vm.reminder(h,m,reminder.id) },reminder.hour,reminder.minute,android.text.format.DateFormat.is24HourFormat(context)).show() },Modifier.weight(1f),enabled=!busy) { Text(LocalTime.of(reminder.hour,reminder.minute).format(timeFormat)) }
-                    IconButton({ configureReminder=reminder },enabled=!busy) { Icon(Icons.Outlined.Settings,tr("Reminder options")) }
-                    IconButton({ vm.removeReminder(reminder.id) },enabled=!busy) { Icon(Icons.Outlined.Close,tr("Remove reminder")) }
+            SettingsSection(tr("Medications")) {
+                state.medications.filter { it.active }.forEach { med ->
+                    SettingsRow(med.name,Modifier.clickable(enabled=!busy,onClickLabel=tr("Edit %s",med.name)) { onMedication(med.id) },tr("Usual dose · %s %s",doseText(med.usualDose),tr(med.unit)),Icons.Outlined.Medication,!busy) {
+                        IconButton({ remove=med },enabled=!busy) { Icon(Icons.Outlined.RemoveCircleOutline,tr("Remove %s",med.name)) }
+                    }
+                    SettingsDivider()
+                }
+                SettingsRow(tr("Add medication"),Modifier.clickable(enabled=!busy,role=androidx.compose.ui.semantics.Role.Button) { onMedication(-1) },icon=Icons.Outlined.Add,enabled=!busy)
+                SettingsDivider()
+                SettingsNavRow(tr("Supply"),icon=Icons.Outlined.Inventory2) { onShould("supply") }
+                SettingsDivider()
+                SettingsRow(tr("Archived medications"),Modifier.clickable { archived=!archived },icon=Icons.Outlined.Archive) {
+                    Icon(if(archived) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,null,tint=Muted)
+                }
+                if(archived) {
+                    val inactive=state.medications.filter { !it.active }
+                    if(inactive.isEmpty()) SettingsRow(tr("No archived medications."),enabled=false)
+                    inactive.forEach { med ->
+                        SettingsRow(med.name) { TextButton({ vm.medication(med.copy(active=true)) {} },enabled=!busy) { Text(tr("Reactivate")) } }
+                    }
                 }
             }
-            item { TextButton({ TimePickerDialog(context,{ _,h,m -> vm.reminder(h,m) },12,0,android.text.format.DateFormat.is24HourFormat(context)).show() },enabled=!busy) { Text(tr("＋ Add time")) } }
-            if(denied) item {
-                Note("Notifications are turned off. Your reminder times are saved.")
-                TextButton({ context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,context.packageName)) }) { Text(tr("Open notification settings")) }
+        }
+        item {
+            SettingsSection(tr("Reminders"),footer=tr("A gentle reminder to log. Delivery may be delayed by battery settings.")) {
+                val status=if(!state.remindersEnabled) null else tr(when { denied -> "Notifications are turned off. Your reminder times are saved.";paused -> "Reminders are paused.";state.reminders.isEmpty() -> "No reminder times. Add a time to receive reminders.";else -> "Reminders are scheduled." })
+                SettingsSwitchRow(tr("Reminders"),state.remindersEnabled,{ enabled ->
+                    if(enabled && Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    else { denied=!NotificationManagerCompat.from(context).areNotificationsEnabled(); vm.reminders(enabled) }
+                },status,Icons.Outlined.Notifications,!busy)
+                if(state.remindersEnabled) {
+                    state.reminders.forEach { reminder ->
+                        SettingsDivider()
+                        val target=reminder.medicationId?.let { id -> state.medications.firstOrNull { it.id==id }?.name } ?: tr("Generic reminder")
+                        SettingsRow(LocalTime.of(reminder.hour,reminder.minute).format(timeFormat),Modifier.clickable(enabled=!busy) { TimePickerDialog(context,{ _,h,m -> vm.reminder(h,m,reminder.id) },reminder.hour,reminder.minute,is24h).show() },target,Icons.Outlined.Alarm,!busy) {
+                            Row {
+                                IconButton({ configureReminder=reminder },enabled=!busy) { Icon(Icons.Outlined.Tune,tr("Reminder options")) }
+                                IconButton({ vm.removeReminder(reminder.id) },enabled=!busy) { Icon(Icons.Outlined.RemoveCircleOutline,tr("Remove reminder")) }
+                            }
+                        }
+                    }
+                    SettingsDivider()
+                    SettingsRow(tr("Add time"),Modifier.clickable(enabled=!busy,role=androidx.compose.ui.semantics.Role.Button) { TimePickerDialog(context,{ _,h,m -> vm.reminder(h,m) },12,0,is24h).show() },icon=Icons.Outlined.Add,enabled=!busy)
+                    if(denied) {
+                        SettingsDivider()
+                        SettingsNavRow(tr("Open notification settings"),icon=Icons.Outlined.NotificationsOff) { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,context.packageName)) }
+                    }
+                }
+                SettingsDivider()
+                SettingsNavRow(tr(if(paused) "Resume / change pause" else "Pause reminders"),icon=Icons.Outlined.PauseCircle) { onShould("pause") }
             }
         }
-        item { HorizontalDivider(); Spacer(Modifier.height(8.dp)); Text(tr("Data & privacy"),fontSize=20.sp,fontWeight=FontWeight.SemiBold) }
-        item { Text(tr("Your log stays on this device. No account needed."),color=Muted); Spacer(Modifier.height(8.dp)); Note("Cloud backups are disabled. Uninstalling removes your log. Create a backup to restore it later.") }
-        item { PrivacyControl() }
-        item { TextButton({ onShould("pause") }) { Text(tr(if(state.pause.active(System.currentTimeMillis())) "Resume / change pause" else "Pause reminders")) } }
-        item { TextButton({ onShould("widget") }) { Text(tr("Home-screen widget")) } }
-        item { TextButton({ onShould("supply") }) { Text(tr("Supply")) } }
-        item { Row { Text(tr("Optional observations"),Modifier.weight(1f));Switch(vm.observationsEnabled(),{ vm.preference("observations_enabled",it.toString()) },enabled=!busy,modifier=Modifier.semantics { contentDescription=tr("Show observation shortcut on Home") }) } }
-        item { Row { Text(tr("Measurements"),Modifier.weight(1f));Switch(vm.enabled("measurements_enabled"),{ vm.preference("measurements_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Measurements") },enabled=!busy) }; Text(tr("Available in observations. Disabling keeps saved records.")) }
-        item { Row { Text(tr("Weekly overview"),Modifier.weight(1f));Switch(vm.enabled("weekly_enabled"),{ vm.preference("weekly_enabled",it.toString()) },Modifier.semantics { contentDescription=tr("Weekly overview") },enabled=!busy) } }
-        item { TextButton({ onShould("quick") }) { Text(tr("Quick access")) } }
-        item { BackupControls(vm,busy) }
-        item { TextButton(onExport) { Text(tr("Export your log →")) } }
+        item {
+            SettingsSection(tr("Optional features")) {
+                SettingsSwitchRow(tr("Optional observations"),vm.observationsEnabled(),{ vm.preference("observations_enabled",it.toString()) },icon=Icons.Outlined.EditNote,enabled=!busy)
+                SettingsDivider()
+                SettingsSwitchRow(tr("Measurements"),vm.enabled("measurements_enabled"),{ vm.preference("measurements_enabled",it.toString()) },tr("Available in observations. Disabling keeps saved records."),Icons.Outlined.MonitorHeart,!busy)
+                SettingsDivider()
+                SettingsSwitchRow(tr("Weekly overview"),vm.enabled("weekly_enabled"),{ vm.preference("weekly_enabled",it.toString()) },icon=Icons.Outlined.CalendarMonth,enabled=!busy)
+                SettingsDivider()
+                SettingsNavRow(tr("Home-screen widget"),icon=Icons.Outlined.Widgets) { onShould("widget") }
+                SettingsDivider()
+                SettingsNavRow(tr("Quick access"),icon=Icons.Outlined.Bolt) { onShould("quick") }
+            }
+        }
+        item {
+            SettingsSection(tr("Data & privacy"),footer=tr("Your log stays on this device. No account needed.")) {
+                PrivacyControl()
+            }
+        }
+        item {
+            SettingsSection(tr("Backup & export"),footer=tr("Cloud backups are disabled. Uninstalling removes your log. Create a backup to restore it later.")) {
+                BackupControls(vm,busy)
+                SettingsDivider()
+                SettingsNavRow(tr("Export your log"),icon=Icons.Outlined.IosShare,onClick=onExport)
+            }
+        }
         item { Note("ADHS Logbook · 0.4.0\nEstimates are informational and are not medical measurements.") }
     }
     configureReminder?.let { ReminderOptions(it,state.medications,{ configureReminder=null }) { value -> vm.reminder(value);configureReminder=null } }

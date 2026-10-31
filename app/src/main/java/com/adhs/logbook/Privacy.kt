@@ -9,6 +9,8 @@ import android.util.Base64
 import android.view.WindowManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -80,10 +82,7 @@ object AppPrivacy {
 @Composable fun PrivacyControl() {
     val activity=androidx.activity.compose.LocalActivity.current as FragmentActivity
     var message by remember { mutableStateOf<String?>(null) }
-    Row(verticalAlignment=Alignment.CenterVertically) {
-        Text(tr("App lock"),Modifier.weight(1f))
-        Switch(AppPrivacy.enabled,{ desired -> AppPrivacy.authenticate(activity,{ runCatching { AppPrivacy.setEnabled(activity,desired) }.onFailure { message=tr("Could not save or load data. Please try again.") } },{ message=it }) },Modifier.semantics { contentDescription=tr("App lock") })
-    }
-    Text(tr("Relocks when you leave the app. Exported files remain outside this lock; this is not whole-database encryption."),style=MaterialTheme.typography.bodySmall)
-    message?.let { Text(it) }
+    SettingsSwitchRow(tr("App lock"),AppPrivacy.enabled,{ desired -> AppPrivacy.authenticate(activity,{ runCatching { AppPrivacy.setEnabled(activity,desired) }.onFailure { message=tr("Could not save or load data. Please try again.") } },{ message=it }) },
+        tr("Relocks when you leave the app. Exported files remain outside this lock; this is not whole-database encryption."),Icons.Outlined.Lock)
+    message?.let { Text(it,Modifier.padding(horizontal=16.dp,vertical=8.dp),color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall) }
 }

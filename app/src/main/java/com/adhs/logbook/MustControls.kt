@@ -5,6 +5,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -59,11 +63,14 @@ fun BackupControls(vm: LogbookViewModel,busy: Boolean,restoreOnly: Boolean = fal
         TextButton({ open.launch(arrayOf("*/*")) },enabled=!busy && !working) { Text(tr("Restore backup")) }
         if(working) LinearProgressIndicator()
     } else Column {
-        last?.let { Text(tr("Last backup: %s",runCatching { java.time.ZonedDateTime.parse(it).format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)) }.getOrDefault(it))) }
-        TextButton({ create.launch("ADHS-logbook.adhsbak") },enabled=!busy && !working) { Text(tr("Create backup")) }
-        TextButton({ open.launch(arrayOf("*/*")) },enabled=!busy && !working) { Text(tr("Restore backup")) }
-        TextButton({ preview=vm.recovery();if(preview==null) message=tr("No pre-restore snapshot available.") },enabled=!busy && !working) { Text(tr("Recover pre-restore log")) }
-        if(working) { LinearProgressIndicator();Text(tr("Working…")) }
+        val idle=!busy && !working
+        val lastText=last?.let { tr("Last backup: %s",runCatching { java.time.ZonedDateTime.parse(it).format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)) }.getOrDefault(it)) }
+        SettingsNavRow(tr("Create backup"),lastText,Icons.Outlined.Backup,idle) { create.launch("ADHS-logbook.adhsbak") }
+        SettingsDivider()
+        SettingsNavRow(tr("Restore backup"),icon=Icons.Outlined.Restore,enabled=idle) { open.launch(arrayOf("*/*")) }
+        SettingsDivider()
+        SettingsNavRow(tr("Recover pre-restore log"),icon=Icons.Outlined.History,enabled=idle) { preview=vm.recovery();if(preview==null) message=tr("No pre-restore snapshot available.") }
+        if(working) Column(Modifier.padding(horizontal=16.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) { LinearProgressIndicator(Modifier.fillMaxWidth());Text(tr("Working…"),style=MaterialTheme.typography.bodySmall) }
     }
     dialog?.let { mode -> AlertDialog(onDismissRequest={ dialog=null;password="";confirmPassword="" },title={ Text(tr(if(mode=="create") "Create backup" else "Restore backup")) },text={
         Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {

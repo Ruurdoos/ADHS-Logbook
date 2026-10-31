@@ -18,6 +18,7 @@ object TextCatalog {
         "Manual records only. No clinical interpretation is provided." to "Nur manuelle Aufzeichnungen. Es erfolgt keine medizinische Bewertung.",
         "Add measurement" to "Messwert hinzufügen",
         "Available in observations. Disabling keeps saved records." to "Unter Beobachtungen verfügbar. Gespeicherte Werte bleiben beim Deaktivieren erhalten.",
+        "Blood pressure, pulse and weight. Disabling keeps saved records." to "Blutdruck, Puls und Gewicht. Gespeicherte Werte bleiben beim Deaktivieren erhalten.",
         "Weekly overview" to "Wochenübersicht",
         "Previous week" to "Vorige Woche",
         "Next week" to "Nächste Woche",

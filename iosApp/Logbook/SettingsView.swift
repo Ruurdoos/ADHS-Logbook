@@ -39,7 +39,7 @@ struct SettingsView: View {
             Section(l("Optional features")) {
                 Toggle(l("Optional observations"),isOn: Binding(get: { store.state.document.preferences["observations_enabled"] == "true" },set: { enabled in store.attempt { try await store.change { $0.document.preferences["observations_enabled"] = String(enabled) } } }))
                 Toggle(l("Measurements"),isOn: Binding(get: { store.state.document.preferences["measurements_enabled"] == "true" },set: { enabled in store.attempt { try await store.change { $0.document.preferences["measurements_enabled"] = String(enabled) } } }))
-                Text(l("Available in observations. Disabling keeps saved records."))
+                Text(l("Blood pressure, pulse and weight. Disabling keeps saved records."))
                 Toggle(l("Weekly overview"),isOn: Binding(get: { store.state.document.preferences["weekly_enabled"] == "true" },set: { enabled in store.attempt { try await store.change { $0.document.preferences["weekly_enabled"] = String(enabled) } } }))
                 NavigationLink(l("Quick access")) { QuickAccessView() }
                 NavigationLink(l("Pause reminders")) { PauseForm() }

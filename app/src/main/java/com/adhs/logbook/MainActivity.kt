@@ -803,7 +803,7 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
             SettingsSection(tr("Optional features")) {
                 SettingsSwitchRow(tr("Optional observations"),vm.observationsEnabled(),{ vm.preference("observations_enabled",it.toString()) },icon=Icons.Outlined.EditNote,enabled=!busy)
                 SettingsDivider()
-                SettingsSwitchRow(tr("Measurements"),vm.enabled("measurements_enabled"),{ vm.preference("measurements_enabled",it.toString()) },tr("Available in observations. Disabling keeps saved records."),Icons.Outlined.MonitorHeart,!busy)
+                SettingsSwitchRow(tr("Measurements"),vm.enabled("measurements_enabled"),{ vm.preference("measurements_enabled",it.toString()) },tr("Blood pressure, pulse and weight. Disabling keeps saved records."),Icons.Outlined.MonitorHeart,!busy)
                 SettingsDivider()
                 SettingsSwitchRow(tr("Weekly overview"),vm.enabled("weekly_enabled"),{ vm.preference("weekly_enabled",it.toString()) },icon=Icons.Outlined.CalendarMonth,enabled=!busy)
                 SettingsDivider()

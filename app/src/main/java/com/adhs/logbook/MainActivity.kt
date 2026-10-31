@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -267,6 +268,12 @@ fun LogbookApp(vm: LogbookViewModel = viewModel(), reviewIntent: String? = null,
 @Composable private fun Primary(text: String, enabled: Boolean = true, onClick: () -> Unit) {
     Button(onClick,Modifier.fillMaxWidth().heightIn(min=56.dp),enabled=enabled,shape=MaterialTheme.shapes.large) {
         Text(tr(text),fontSize=16.sp,modifier=Modifier.padding(vertical=6.dp))
+    }
+}
+@Composable private fun CheckboxRow(text: String,checked: Boolean,onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min=48.dp).toggleable(checked,role=androidx.compose.ui.semantics.Role.Checkbox,onValueChange=onChange),verticalAlignment=Alignment.CenterVertically) {
+        Checkbox(checked,null,Modifier.padding(12.dp))
+        Text(tr(text))
     }
 }
 @Composable private fun Note(text: String) { Text(tr(text),color=Muted,style=MaterialTheme.typography.bodySmall,lineHeight=19.sp) }
@@ -640,8 +647,10 @@ private fun pickDate(context: android.content.Context,date: LocalDate,onPick: (L
         when { invalid -> Note("Choose a valid range of up to 366 days."); count==0 -> Note("No doses logged. This does not confirm that no medication was taken."); else -> Note(tr("Entries: %d · %s",count,ZoneId.systemDefault().id)) }
         Note("Only your selected dates are included. You choose where to share the file.")
         Spacer(Modifier.weight(1f))
-        Row { Checkbox(summary,{ summary=it },Modifier.semantics { contentDescription=tr("Summary with details") });Text(tr("Summary with details")) }
-        Row { Checkbox(includeNotes,{ includeNotes=it },Modifier.semantics { contentDescription=tr("Include free-text notes") });Text(tr("Include free-text notes")) }
+        Column {
+            CheckboxRow("Summary with details",summary) { summary=it }
+            CheckboxRow("Include free-text notes",includeNotes) { includeNotes=it }
+        }
         if(summary) {
             OutlinedTextField(questions,{ questions=it.take(5000) },label={ Text(tr("Questions for my appointment")) },minLines=2)
             if(!invalid) {

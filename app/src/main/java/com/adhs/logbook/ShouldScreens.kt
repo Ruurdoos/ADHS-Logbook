@@ -9,23 +9,23 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -173,10 +174,11 @@ fun ShouldScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                TextButton(back) { Text(tr("Back")) }; Text(
-                tr("Observations & non-use"),
-                style = MaterialTheme.typography.headlineSmall
-            )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    BackButton(back)
+                    Spacer(Modifier.width(16.dp))
+                    Text(tr("Observations & non-use"), style = MaterialTheme.typography.headlineSmall)
+                }
             }
             item { Button({ navigate("observation:") }) { Text(tr("Add observation")) } }
             if (vm.enabled("measurements_enabled")) item {
@@ -209,7 +211,7 @@ fun ShouldScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        TextButton(back) { Text(tr("Back")) }
+        BackButton(back)
         when {
             mode == "quick" -> QuickAccessSettings(state)
             mode == "weekly" -> WeeklyView(vm.document())
@@ -510,26 +512,11 @@ private fun PauseEditor(original: ReminderPause, busy: Boolean, save: (ReminderP
         )
     }
     Text(tr("Pause reminders"), style = MaterialTheme.typography.headlineSmall)
-    Row {
-        Switch(
-            paused,
-            { paused = it },
-            Modifier.semantics {
-                contentDescription = tr("Pause reminders")
-            }); Text(tr("Pause reminders"))
-    }
+    SwitchRow(tr("Pause reminders"), paused, { paused = it })
     Text(tr("This pauses notifications only. It does not record medication use or non-use."))
     if (paused) {
-        Row {
-            Checkbox(
-                timed,
-                { timed = it },
-                Modifier.semantics { contentDescription = tr("Resume at a chosen time") }); Text(
-            tr(
-                "Resume at a chosen time"
-            )
-        )
-        }; if (timed) TimeField("Resume at", until) { until = it }
+        CheckRow(tr("Resume at a chosen time"), timed, { timed = it })
+        if (timed) TimeField("Resume at", until) { until = it }
     }
     Button(
         { save(ReminderPause(paused, if (paused && timed) until else null)) },
@@ -573,20 +560,11 @@ private fun SupplyEditor(
     var alerts by rememberSaveable { mutableStateOf(vm.supplyNotificationsEnabled()) }
     val permission =
         androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
-    Row {
-        Switch(
-            alerts,
-            {
-                alerts = it; vm.preference(
-                "supply_enabled",
-                it.toString()
-            ); if (it && android.os.Build.VERSION.SDK_INT >= 33) permission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-            },
-            enabled = !busy,
-            modifier = Modifier.semantics {
-                contentDescription = tr("Supply notifications")
-            }); Text(tr("Supply notifications"))
-    }
+    SwitchRow(tr("Supply notifications"), alerts, {
+        alerts = it
+        vm.preference("supply_enabled", it.toString())
+        if (it && android.os.Build.VERSION.SDK_INT >= 33) permission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    }, enabled = !busy)
     if (alerts && !androidx.core.app.NotificationManagerCompat.from(context)
             .areNotificationsEnabled()
     ) Text(tr("Notifications are off in system settings. Enable them to receive supply alerts."))
@@ -622,14 +600,7 @@ private fun SupplyEditor(
             tr("Mapping uses the medication's logging unit. Leave blank to record stock units explicitly in each dose. No conversion is inferred."),
             style = MaterialTheme.typography.bodySmall
         )
-        Row {
-            Checkbox(
-                rx,
-                { rx = it },
-                Modifier.semantics {
-                    contentDescription = tr("Prescription request reminder")
-                }); Text(tr("Prescription request reminder"))
-        }
+        CheckRow(tr("Prescription request reminder"), rx, { rx = it })
         if (rx) TimeField("Prescription request date", rxDate) { rxDate = it }
         fun nonnegative(text: String) =
             text.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 }
@@ -686,14 +657,7 @@ private fun WidgetSetup(state: LogbookState) {
         state.medications.filter { it.active }.map { it.id.toString() to it.name },
         medId
     ) { medId = it }
-    Row {
-        Checkbox(
-            private,
-            { private = it },
-            Modifier.semantics {
-                contentDescription = tr("Generic widget content")
-            }); Text(tr("Generic widget content"))
-    }
+    CheckRow(tr("Generic widget content"), private, { private = it })
     Text(tr("App lock always hides widget details. Changed medication settings require review in the app."))
     Button(
         {

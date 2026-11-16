@@ -113,7 +113,7 @@ class LoggingFlowTest {
             org.junit.Assert.assertEquals("none",record.response);org.junit.Assert.assertNull(record.value)
             store.deleteObservation(record.id)
         }
-        ui.onNodeWithText("Back").performClick()
+        ui.onNodeWithContentDescription("Back").performClick()
         ui.onNodeWithText("Export").performClick()
         ui.onNodeWithText("Summary with details").performScrollTo().assertExists()
         ui.onNodeWithText("Include free-text notes").performScrollTo().assertExists()
@@ -136,7 +136,7 @@ class LoggingFlowTest {
                 org.junit.Assert.assertEquals(before,store.snapshot().entries.size)
                 org.junit.Assert.assertEquals(80.0,store.snapshot().measurements.first { it.notes=="Could measurement fixture" }.diastolic!!,0.0)
             }
-            ui.onNodeWithText("Back").performClick()
+            ui.onNodeWithContentDescription("Back").performClick()
             ui.onNode(hasText("History") and hasClickAction()).performClick()
             ui.onNodeWithText("Weekly overview").performClick()
             ui.onNodeWithText("Choose week").assertExists()
@@ -167,7 +167,7 @@ class LoggingFlowTest {
         ui.onAllNodesWithText("Response").onLast().performClick();ui.onNodeWithText("None").performClick()
         ui.onNodeWithText("Notes (optional)").performScrollTo().performTextInput("Preserved draft")
         ui.onNodeWithText("Add measurement").performScrollTo().performClick()
-        ui.onNodeWithText("Back").performClick();ui.onNodeWithText("Discard").performClick()
+        ui.onNodeWithContentDescription("Back").performClick();ui.onNodeWithText("Discard").performClick()
         ui.onNodeWithText("Preserved draft").performScrollTo().assertExists()
         ui.onNodeWithText("Save").performScrollTo().performClick()
         ui.waitUntil(10_000) { Store(ui.activity).use { it.snapshot().observations.any { o->o.notes=="Preserved draft" } } }

@@ -47,7 +47,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Alarm
@@ -441,7 +440,7 @@ fun LogbookApp(
         ) {
             when {
                 shouldPage == "backup" -> ScrollPage {
-                    TextButton({ closePage() }) { Text(tr("Back")) }; BackupControls(
+                    BackButton({ closePage() }); BackupControls(
                     vm,
                     busy
                 )
@@ -655,7 +654,8 @@ private fun Note(text: String) {
 @Composable
 private fun BackTitle(title: String, onBack: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("Back")) }
+        BackButton(onBack)
+        Spacer(Modifier.width(16.dp))
         Text(
             tr(title),
             fontSize = 26.sp,
@@ -1300,15 +1300,7 @@ private fun EntryEditor(
             singleLine = true
         )
         if (onNonUse != null && entry == null) TextButton({ onNonUse(medId) }) { Text(tr("Record not taken")) }
-        if (entry == null) Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(tr("Taken now"), Modifier.weight(1f)); Switch(
-            useNow,
-            { useNow = it },
-            Modifier.semantics { contentDescription = tr("Taken now") })
-        }
+        if (entry == null) SwitchRow(tr("Taken now"), useNow, { useNow = it })
         if (!useNow) {
             val date = LocalDate.parse(dateText)
             val time = LocalTime.parse(timeText)

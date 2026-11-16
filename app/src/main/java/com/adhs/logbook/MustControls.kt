@@ -4,7 +4,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -70,17 +69,7 @@ fun ReminderOptions(
                         onClick = { selected = med.id },
                         label = { Text("${med.name} · ${doseText(med.usualDose)} ${tr(med.unit)}") })
                 }
-                Row {
-                    Checkbox(
-                        follow,
-                        { follow = it },
-                        Modifier.semantics {
-                            contentDescription = tr("One follow-up after 30 minutes")
-                        }); Text(
-                    tr("One follow-up after 30 minutes"),
-                    Modifier.padding(top = 12.dp)
-                )
-                }
+                CheckRow(tr("One follow-up after 30 minutes"), follow, { follow = it })
                 Text(tr("Stop this reminder after"))
                 listOf(60, 120, 240).forEach { minutes ->
                     FilterChip(

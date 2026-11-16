@@ -3,7 +3,6 @@ package com.adhs.logbook
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -94,14 +93,7 @@ fun MeasurementEditor(
                     label = { Text(u) })
             }
         }
-        Row {
-            Checkbox(
-                conversion,
-                { conversion = it },
-                Modifier.semantics {
-                    contentDescription = tr("Show converted value")
-                }); Text(tr("Show converted value"))
-        }
+        CheckRow(tr("Show converted value"), conversion, { conversion = it })
         if (conversion) parseDose(value)?.let { v ->
             val to = if (unit == "kg") "lb" else "kg"; runCatching {
             MeasurementRules.weight(
@@ -247,18 +239,11 @@ fun QuickAccessSettings(state: LogbookState) {
         error = runCatching(action).isFailure
     }
     Text(tr("Quick access"), style = MaterialTheme.typography.headlineSmall)
-    Row {
-        Switch(
-            enabled,
-            { value ->
-                attempt {
-                    QuickAccess.enable(context, value); enabled = QuickAccess.enabled(context)
-                }
-            },
-            Modifier.semantics {
-                contentDescription = tr("Enable quick access")
-            }); Text(tr("Enable quick access"))
-    }
+    SwitchRow(tr("Enable quick access"), enabled, { value ->
+        attempt {
+            QuickAccess.enable(context, value); enabled = QuickAccess.enabled(context)
+        }
+    })
     if (error) Text(
         tr("Could not save or load data. Please try again."),
         color = MaterialTheme.colorScheme.error

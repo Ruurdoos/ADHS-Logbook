@@ -39,6 +39,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -550,6 +552,7 @@ fun LogbookApp(
                             { shouldPage = "observation:" }
                         } else null,
                         onMeasurement = { shouldPage = "measurement:" },
+                        onRecords = { shouldPage = "records" },
                         measurementsEnabled = vm.enabled("measurements_enabled")
                     )
                 }
@@ -853,6 +856,7 @@ private fun HomeScreen(
     onAdd: () -> Unit,
     onObservation: (() -> Unit)?,
     onMeasurement: () -> Unit,
+    onRecords: () -> Unit,
     measurementsEnabled: Boolean = false
 ) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -915,6 +919,7 @@ private fun HomeScreen(
                             ) { Text(tr("Add medication")) }
                         }
                     }
+                    RecordsCard(state, now, zone, onRecords)
                 } else {
                     if (state.medications.count { it.active } > 1) Box {
                         OutlinedButton(
@@ -1019,6 +1024,7 @@ private fun HomeScreen(
                             ) { Text(tr("About this estimate")) }
                         }
                     }
+                    RecordsCard(state, now, zone, onRecords)
                     Spacer(Modifier.height(8.dp))
                 }
                 if (recordActions.isNotEmpty()) Spacer(Modifier.height(56.dp))
@@ -1068,6 +1074,42 @@ private fun HomeScreen(
                 Text(tr("Sources: DailyMed Ritalin, Ritalin LA (IR comparison) and Vyvanse capsule labels. Models: ritalin-ir-v1 / vyvanse-capsule-v1. Engine: relative-heuristic-v1."))
             }
         })
+}
+
+/** Home entry point to observations, measurements and non-use records, with a short summary of today. */
+@Composable
+private fun RecordsCard(state: LogbookState, now: Long, zone: ZoneId, onOpen: () -> Unit) {
+    val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+    val from = today.atStartOfDay(zone).toInstant().toEpochMilli()
+    val until = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    val todayCount = state.observations.count { it.timestamp in from until until } +
+            state.measurements.count { it.timestamp in from until until } +
+            state.nonUse.count { it.intersects(from, until) }
+    Surface(
+        onClick = onOpen,
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Surface(color = Pale, shape = CircleShape, modifier = Modifier.size(44.dp)) {
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.EditNote, null, tint = Sage) }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(tr("Observations & non-use"), fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (todayCount == 0) tr("Nothing recorded today") else tr("Today: %d records", todayCount),
+                    color = Muted,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = Muted)
+        }
+    }
 }
 
 internal class RecordAction(

@@ -382,6 +382,8 @@ object TextCatalog {
         "Show observation shortcut on Home" to "Beobachtungs-Schnellzugriff auf der Startseite zeigen",
         "Mood recorded with doses" to "Stimmung bei der Einnahme",
         "Edit amount or time" to "Menge oder Zeitpunkt bearbeiten",
-        "Record %s %s now" to "Jetzt %s %s erfassen"
+        "Record %s %s now" to "Jetzt %s %s erfassen",
+        "Today: %d records" to "Heute: %d Einträge",
+        "Nothing recorded today" to "Heute noch nichts erfasst"
     )
 }

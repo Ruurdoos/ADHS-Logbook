@@ -99,8 +99,7 @@ class LoggingFlowTest {
     @Test fun observationWithoutDoseAndSummaryPreview() {
         openHome()
         val before=Store(ui.activity).use { it.snapshot().entries.size }
-        ui.onNodeWithText("History").performClick()
-        ui.onNodeWithText("Observations & non-use").performClick()
+        ui.onNodeWithText("Observations & non-use").performScrollTo().performClick()
         ui.onNodeWithText("Add observation").performClick()
         ui.onAllNodesWithText("Response").onLast().performClick()
         ui.onNodeWithText("None").performClick()
@@ -124,8 +123,7 @@ class LoggingFlowTest {
         val before=Store(ui.activity).use { store -> store.setPref("measurements_enabled","true");store.setPref("weekly_enabled","true");store.snapshot().entries.size }
         ui.activityRule.scenario.recreate();openHome()
         try {
-            ui.onNode(hasText("History") and hasClickAction()).performClick()
-            ui.onNodeWithText("Observations & non-use").performClick()
+            ui.onNodeWithText("Observations & non-use").performScrollTo().performClick()
             ui.onNodeWithText("Add measurement").performClick()
             ui.onNodeWithText("Systolic (mmHg)").performTextInput("120")
             ui.onNodeWithText("Diastolic (mmHg)").performTextInput("80")

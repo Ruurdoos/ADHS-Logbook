@@ -56,7 +56,6 @@ import com.adhs.logbook.shared.sleepQualityLabels
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 fun categoryName(key: String) = when (key) {
@@ -86,10 +85,7 @@ fun TimeField(label: String, value: Long, onChange: (Long) -> Unit) {
             date.dayOfMonth
         ).show()
     }) {
-        Text(
-            date.toLocalDate()
-                .format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM))
-        )
+        Text(date.toLocalDate().display())
     }
     OutlinedButton({
         TimePickerDialog(
@@ -193,15 +189,13 @@ fun ShouldScreen(
             item { Button({ navigate("nonuse:") }) { Text(tr("Record not taken")) } }
             if (rows.isEmpty()) item { Text(tr("No records yet. Unrecorded days remain unknown.")) }
             items(rows, key = { it.second }) { (time, target, label) ->
+                val context = LocalContext.current
                 OutlinedButton({
                     navigate(
                         target
                     )
                 }, Modifier.fillMaxWidth()) {
-                    Text(
-                        label + "\n" + Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault())
-                            .format(DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT))
-                    )
+                    Text(label + "\n" + dateTimeText(time, context))
                 }
             }
         }
@@ -360,13 +354,13 @@ private fun ObservationEditor(
                 day.monthValue - 1,
                 day.dayOfMonth
             ).show()
-        }) { Text(sleep) }
+        }) { Text(runCatching { LocalDate.parse(sleep).display() }.getOrDefault(sleep)) }
     }
     Choice(
         "Optional dose link",
         listOf("" to "No dose link") + state.entries.map {
             it.id.toString() to "${it.medicationName} · ${
-                Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+                Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate().display()
             } · ${doseText(it.doseMg)} ${it.unit}"
         },
         link
@@ -461,8 +455,8 @@ private fun NonUseEditor(
                 zone.monthValue - 1,
                 zone.dayOfMonth
             ).show()
-        }) { Text(zone.toLocalDate().toString()) }
-    } else if (kind == "scheduled") Text(zone.toString())
+        }) { Text(zone.toLocalDate().display()) }
+    } else if (kind == "scheduled") Text(dateTimeText(start, LocalContext.current))
     else {
         TimeField("Start", start) { start = it }; TimeField("End", end) { end = it }
     }

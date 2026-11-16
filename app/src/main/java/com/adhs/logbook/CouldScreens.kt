@@ -161,7 +161,7 @@ fun WeeklyView(document: BackupDocument) {
     val week =
         remember(document, start, zone) { WeeklyBuilder.build(document, weekBounds(start, zone)) }
     Text(tr("Weekly overview"), style = MaterialTheme.typography.headlineSmall)
-    Text("$start – ${start.plusDays(6)} · ${zone.id}")
+    Text("${start.display()} – ${start.plusDays(6).display()} · ${zone.id}")
     Row {
         TextButton({
             selected = start.minusWeeks(1).toString()
@@ -194,7 +194,7 @@ fun WeeklyView(document: BackupDocument) {
     week.legacyMoods.forEach { Text(tr(moodLabels[it.value]) + ": ${it.count}") }
     week.days.forEach { day ->
         HorizontalDivider(); Text(
-        Instant.ofEpochMilli(day.start).atZone(zone).toLocalDate().toString(),
+        Instant.ofEpochMilli(day.start).atZone(zone).toLocalDate().displayWithWeekday(),
         style = MaterialTheme.typography.titleMedium
     )
         if (day.doses.isEmpty() && day.observations.isEmpty() && day.measurements.isEmpty() && day.nonUse.isEmpty()) Text(
@@ -227,8 +227,7 @@ fun WeeklyView(document: BackupDocument) {
         day.nonUse.forEach {
             Text(
                 tr(nonUseName(it.kind)) + " · " + (document.medications.find { med -> med.id == it.medicationId }?.name
-                    ?: "") + " · " + Instant.ofEpochMilli(it.start)
-                    .atZone(zone) + " – " + Instant.ofEpochMilli(it.end).atZone(zone)
+                    ?: "") + " · " + dateTimeText(it.start, context, zone) + " – " + dateTimeText(it.end, context, zone)
             ); if (it.notes.isNotBlank()) Text(it.notes)
         }
     }

@@ -175,7 +175,7 @@ private val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurface
 private val Paper: Color @Composable get() = MaterialTheme.colorScheme.background
 private val Pale: Color @Composable get() = MaterialTheme.colorScheme.primaryContainer
 private val StrokeColor: Color @Composable get() = MaterialTheme.colorScheme.outlineVariant
-private val dayFormat get() = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault())
+private val dayFormat get() = DateTimeFormatter.ofPattern("EEEE, dd.MM.yyyy", Locale.getDefault())
 internal fun timeFormat(context: Context) = DateTimeFormatter.ofPattern(
     if (android.text.format.DateFormat.is24HourFormat(context)) "HH:mm" else "h:mm a",
     Locale.getDefault()
@@ -946,7 +946,7 @@ private fun HomeScreen(
                             Text("${last.medicationName} · ${doseText(last.doseMg)} ${tr(last.unit)}")
                             Note(
                                 Instant.ofEpochMilli(last.timestamp).atZone(zone)
-                                    .format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)) + " · " + Instant.ofEpochMilli(
+                                    .format(dateFormat) + " · " + Instant.ofEpochMilli(
                                     last.timestamp
                                 ).atZone(zone).format(timeFormat(LocalContext.current))
                             )
@@ -1634,13 +1634,13 @@ private fun ExportScreen(document: BackupDocument, snackbar: SnackbarHostState) 
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
-        ) { Text(tr("From · %s", start)) }
+        ) { Text(tr("From · %s", from.display())) }
         OutlinedButton(
             { pickDate(context, to) { end = it.toString() } },
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
-        ) { Text(tr("To · %s", end)) }
+        ) { Text(tr("To · %s", to.display())) }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TextButton({
                 end = LocalDate.now().toString(); start = LocalDate.now().minusDays(6).toString()

@@ -323,7 +323,7 @@ object Reports {
             var date = start
             while (!date.isAfter(end)) {
                 val day = grouped[date].orEmpty()
-                writer.heading(date.format(DateTimeFormatter.ofPattern("EEEE, d MMM yyyy")))
+                writer.heading(date.displayWithWeekday())
                 if (day.isEmpty()) writer.paragraph(tr("No doses logged. This does not confirm that no medication was taken."))
                 else {
                     day.distinctBy { it.medicationId to it.modelId }.forEach { sample ->
@@ -362,7 +362,7 @@ object Reports {
                                     .format(clockFormat) + " · " + tr(categoryName(o.category)) + " · " + tr(
                                     responseName(o.response)
                                 ) + (o.value?.let { " $it / 4" }
-                                    ?: "") + (o.sleepDate?.let { " · $it" } ?: ""))
+                                    ?: "") + (o.sleepDate?.let { s -> " · " + runCatching { LocalDate.parse(s).display() }.getOrDefault(s) } ?: ""))
                             if (o.response == "rated") writer.paragraph(
                                 tr(
                                     ratingDescription(
@@ -378,8 +378,7 @@ object Reports {
                     details += n.start to {
                         writer.paragraph(
                             tr(nonUseName(n.kind)) + " · " + (doc.medications.find { it.id == n.medicationId }?.name
-                                ?: "") + " · " + Instant.ofEpochMilli(n.start)
-                                .atZone(zone) + " – " + Instant.ofEpochMilli(n.end).atZone(zone)
+                                ?: "") + " · " + dateTimeText(n.start, clockFormat, zone) + " – " + dateTimeText(n.end, clockFormat, zone)
                         )
                         if (n.notes.isNotBlank()) writer.paragraph(n.notes)
                     }
@@ -431,8 +430,8 @@ private class PdfWriter(
         pageNumber++
         page = document.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNumber).create())
         y = 40f; line(tr("ADHS Logbook — Medication log"), size = 18f)
-        y += 22; line(tr("%s to %s | %s", start, end, zone.id))
-        y += 17; line(tr("Generated %s | Model: relative-heuristic-v1", LocalDate.now()), size = 9f)
+        y += 22; line(tr("%s to %s | %s", start.display(), end.display(), zone.id))
+        y += 17; line(tr("Generated %s | Model: relative-heuristic-v1", LocalDate.now().display()), size = 9f)
         y += 20; line(
             tr("Rough relative estimates, not measured blood levels or dosing guidance."),
             size = 9f

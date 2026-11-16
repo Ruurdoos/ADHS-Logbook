@@ -67,7 +67,7 @@ class LogWidget : GlanceAppWidget() {
                             last.timestamp
                         ).atZone(ZoneId.systemDefault()).format(
                             DateTimeFormatter.ofPattern(
-                                "d MMM, " + if (android.text.format.DateFormat.is24HourFormat(
+                                "dd.MM.yyyy, " + if (android.text.format.DateFormat.is24HourFormat(
                                         context
                                     )
                                 ) "HH:mm" else "h:mm a"

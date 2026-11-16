@@ -135,8 +135,7 @@ fun BackupControls(vm: LogbookViewModel, busy: Boolean, restoreOnly: Boolean = f
             tr(
                 "Last backup: %s",
                 runCatching {
-                    java.time.ZonedDateTime.parse(it)
-                        .format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM))
+                    java.time.ZonedDateTime.parse(it).toLocalDate().display()
                 }.getOrDefault(it)
             )
         }
@@ -223,7 +222,7 @@ fun BackupControls(vm: LogbookViewModel, busy: Boolean, restoreOnly: Boolean = f
                 stamps.min(),
                 stamps.max()
             ).joinToString(" – ") {
-                Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().toString()
+                Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().display()
             }
         }
         AlertDialog(

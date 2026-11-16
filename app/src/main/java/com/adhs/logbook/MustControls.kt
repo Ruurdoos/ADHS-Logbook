@@ -2,48 +2,111 @@ package com.adhs.logbook
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Restore
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.adhs.logbook.shared.*
+import com.adhs.logbook.shared.Medication
+import com.adhs.logbook.shared.Reminder
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
-fun ReminderOptions(reminder: Reminder, medications: List<Medication>,dismiss: () -> Unit,save: (Reminder) -> Unit) {
+fun ReminderOptions(
+    reminder: Reminder,
+    medications: List<Medication>,
+    dismiss: () -> Unit,
+    save: (Reminder) -> Unit
+) {
     var selected by remember { mutableStateOf(reminder.medicationId) }
     var follow by remember { mutableStateOf(reminder.followUp) }
     var cutoff by remember { mutableIntStateOf(reminder.cutoffMinutes) }
-    AlertDialog(onDismissRequest=dismiss,title={ Text(tr("Reminder options")) },text={
-        Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(tr("Choose a medication to enable log-now. Otherwise this reminder opens your log."))
-            FilterChip(selected=selected==null,onClick={ selected=null },label={ Text(tr("Generic reminder")) })
-            medications.filter { it.active }.forEach { med ->
-                FilterChip(selected=selected==med.id,onClick={ selected=med.id },label={ Text("${med.name} · ${doseText(med.usualDose)} ${tr(med.unit)}") })
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text(tr("Reminder options")) },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(tr("Choose a medication to enable log-now. Otherwise this reminder opens your log."))
+                FilterChip(
+                    selected = selected == null,
+                    onClick = { selected = null },
+                    label = { Text(tr("Generic reminder")) })
+                medications.filter { it.active }.forEach { med ->
+                    FilterChip(
+                        selected = selected == med.id,
+                        onClick = { selected = med.id },
+                        label = { Text("${med.name} · ${doseText(med.usualDose)} ${tr(med.unit)}") })
+                }
+                Row {
+                    Checkbox(
+                        follow,
+                        { follow = it },
+                        Modifier.semantics {
+                            contentDescription = tr("One follow-up after 30 minutes")
+                        }); Text(
+                    tr("One follow-up after 30 minutes"),
+                    Modifier.padding(top = 12.dp)
+                )
+                }
+                Text(tr("Stop this reminder after"))
+                listOf(60, 120, 240).forEach { minutes ->
+                    FilterChip(
+                        selected = cutoff == minutes,
+                        onClick = { cutoff = minutes },
+                        label = { Text(tr("%d minutes", minutes)) })
+                }
+                Text(tr("Snooze adds 10 minutes, up to the cutoff. Reminder text hides medication names."))
             }
-            Row { Checkbox(follow,{ follow=it },Modifier.semantics { contentDescription=tr("One follow-up after 30 minutes") });Text(tr("One follow-up after 30 minutes"),Modifier.padding(top=12.dp)) }
-            Text(tr("Stop this reminder after"))
-            listOf(60,120,240).forEach { minutes -> FilterChip(selected=cutoff==minutes,onClick={ cutoff=minutes },label={ Text(tr("%d minutes",minutes)) }) }
-            Text(tr("Snooze adds 10 minutes, up to the cutoff. Reminder text hides medication names."))
-        }
-    },confirmButton={ TextButton({ save(reminder.copy(medicationId=selected,followUp=follow,cutoffMinutes=cutoff)) }) { Text(tr("Save")) } },dismissButton={ TextButton(dismiss) { Text(tr("Cancel")) } })
+        },
+        confirmButton = {
+            TextButton({
+                save(
+                    reminder.copy(
+                        medicationId = selected,
+                        followUp = follow,
+                        cutoffMinutes = cutoff
+                    )
+                )
+            }) { Text(tr("Save")) }
+        },
+        dismissButton = { TextButton(dismiss) { Text(tr("Cancel")) } })
 }
 
 @Composable
-fun BackupControls(vm: LogbookViewModel,busy: Boolean,restoreOnly: Boolean = false) {
+fun BackupControls(vm: LogbookViewModel, busy: Boolean, restoreOnly: Boolean = false) {
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     // Passwords deliberately do not use saved instance state.
     var password by remember { mutableStateOf("") }
@@ -51,54 +114,176 @@ fun BackupControls(vm: LogbookViewModel,busy: Boolean,restoreOnly: Boolean = fal
     val working by vm.backupWorking.collectAsState()
     var preview by vm.backupPreview.collectAsStateMutable()
     var message by vm.backupMessage.collectAsStateMutable()
-    val last=vm.lastBackup()
+    val last = vm.lastBackup()
     var selectedUri by rememberSaveable { mutableStateOf<String?>(null) }
-    val create=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        selectedUri=uri?.toString();dialog=if(uri==null) null else "create"
-    }
-    val open=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        selectedUri=uri?.toString();dialog=if(uri==null) null else "restore"
-    }
-    if(restoreOnly) {
-        TextButton({ open.launch(arrayOf("*/*")) },enabled=!busy && !working) { Text(tr("Restore backup")) }
-        if(working) LinearProgressIndicator()
-    } else Column {
-        val idle=!busy && !working
-        val lastText=last?.let { tr("Last backup: %s",runCatching { java.time.ZonedDateTime.parse(it).format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)) }.getOrDefault(it)) }
-        SettingsNavRow(tr("Create backup"),lastText,Icons.Outlined.Backup,idle) { create.launch("ADHS-logbook.adhsbak") }
-        SettingsDivider()
-        SettingsNavRow(tr("Restore backup"),icon=Icons.Outlined.Restore,enabled=idle) { open.launch(arrayOf("*/*")) }
-        SettingsDivider()
-        SettingsNavRow(tr("Recover pre-restore log"),icon=Icons.Outlined.History,enabled=idle) { preview=vm.recovery();if(preview==null) message=tr("No pre-restore snapshot available.") }
-        if(working) Column(Modifier.padding(horizontal=16.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) { LinearProgressIndicator(Modifier.fillMaxWidth());Text(tr("Working…"),style=MaterialTheme.typography.bodySmall) }
-    }
-    dialog?.let { mode -> AlertDialog(onDismissRequest={ dialog=null;password="";confirmPassword="" },title={ Text(tr(if(mode=="create") "Create backup" else "Restore backup")) },text={
-        Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text(tr("Encrypted backup. Use at least 10 characters. Keep the passphrase separately; it cannot be recovered."))
-            Text(tr("You choose the file destination. Cloud-backed file providers are outside this app's local storage."))
-            OutlinedTextField(password,{ password=it },label={ Text(tr("Passphrase")) },visualTransformation=PasswordVisualTransformation(),singleLine=true)
-            if(mode=="create") OutlinedTextField(confirmPassword,{ confirmPassword=it },label={ Text(tr("Repeat passphrase")) },visualTransformation=PasswordVisualTransformation(),singleLine=true)
+    val create =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+            selectedUri = uri?.toString(); dialog = if (uri == null) null else "create"
         }
-    },confirmButton={ TextButton({ val uri=selectedUri?.let(android.net.Uri::parse)
-        if(uri!=null) {
-            val secret=password.toCharArray();password="";confirmPassword="";dialog=null
-            vm.backupJob(uri,secret,mode=="create");selectedUri=null
-        } },enabled=password.length>=10 && (mode!="create" || password==confirmPassword)) { Text(tr(if(mode=="create") "Create backup" else "Restore backup")) } },dismissButton={ TextButton({ dialog=null;password="";confirmPassword="" }) { Text(tr("Cancel")) } }) }
-    preview?.let { doc ->
-        val range=doc.entries.map { it.timestamp }.let { stamps -> if(stamps.isEmpty()) tr("No entries") else listOf(stamps.min(),stamps.max()).joinToString(" – ") { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().toString() } }
-        AlertDialog(onDismissRequest={ if(!busy) preview=null },title={ Text(tr("Replace current log?")) },text={
-            Column { Text(tr("Medications: %d · Entries: %d",doc.medications.size,doc.entries.size));Text(range);Text(tr("Observations: %d · Measurements: %d · Non-use records: %d",doc.observations.size,doc.measurements.size,doc.nonUse.size))
-                Text(tr("This replaces the current log. A private pre-restore snapshot is kept on this device. Reminders stay off until you enable them.")) }
-        },confirmButton={ TextButton({ vm.restore(doc) { preview=null;if(!restoreOnly) message=tr("Backup restored. Reminders are off.") } },enabled=!busy) { Text(tr("Replace log")) } },dismissButton={ TextButton({ preview=null },enabled=!busy) { Text(tr("Cancel")) } })
+    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        selectedUri = uri?.toString(); dialog = if (uri == null) null else "restore"
     }
-    message?.let { text -> AlertDialog(onDismissRequest={ message=null },text={ Text(text) },confirmButton={ TextButton({ message=null }) { Text(tr("Close")) } }) }
+    if (restoreOnly) {
+        TextButton(
+            { open.launch(arrayOf("*/*")) },
+            enabled = !busy && !working
+        ) { Text(tr("Restore backup")) }
+        if (working) LinearProgressIndicator()
+    } else Column {
+        val idle = !busy && !working
+        val lastText = last?.let {
+            tr(
+                "Last backup: %s",
+                runCatching {
+                    java.time.ZonedDateTime.parse(it)
+                        .format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM))
+                }.getOrDefault(it)
+            )
+        }
+        SettingsNavRow(
+            tr("Create backup"),
+            lastText,
+            Icons.Outlined.Backup,
+            idle
+        ) { create.launch("ADHS-logbook.adhsbak") }
+        SettingsDivider()
+        SettingsNavRow(
+            tr("Restore backup"),
+            icon = Icons.Outlined.Restore,
+            enabled = idle
+        ) { open.launch(arrayOf("*/*")) }
+        SettingsDivider()
+        SettingsNavRow(
+            tr("Recover pre-restore log"),
+            icon = Icons.Outlined.History,
+            enabled = idle
+        ) {
+            preview = vm.recovery(); if (preview == null) message =
+            tr("No pre-restore snapshot available.")
+        }
+        if (working) Column(
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            LinearProgressIndicator(Modifier.fillMaxWidth()); Text(
+            tr("Working…"),
+            style = MaterialTheme.typography.bodySmall
+        )
+        }
+    }
+    dialog?.let { mode ->
+        AlertDialog(
+            onDismissRequest = { dialog = null; password = ""; confirmPassword = "" },
+            title = { Text(tr(if (mode == "create") "Create backup" else "Restore backup")) },
+            text = {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(tr("Encrypted backup. Use at least 10 characters. Keep the passphrase separately; it cannot be recovered."))
+                    Text(tr("You choose the file destination. Cloud-backed file providers are outside this app's local storage."))
+                    OutlinedTextField(
+                        password,
+                        { password = it },
+                        label = { Text(tr("Passphrase")) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true
+                    )
+                    if (mode == "create") OutlinedTextField(
+                        confirmPassword,
+                        { confirmPassword = it },
+                        label = { Text(tr("Repeat passphrase")) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    {
+                        val uri = selectedUri?.let(android.net.Uri::parse)
+                        if (uri != null) {
+                            val secret = password.toCharArray(); password = ""; confirmPassword =
+                                ""; dialog = null
+                            vm.backupJob(uri, secret, mode == "create"); selectedUri = null
+                        }
+                    },
+                    enabled = password.length >= 10 && (mode != "create" || password == confirmPassword)
+                ) { Text(tr(if (mode == "create") "Create backup" else "Restore backup")) }
+            },
+            dismissButton = {
+                TextButton({
+                    dialog = null; password = ""; confirmPassword = ""
+                }) { Text(tr("Cancel")) }
+            })
+    }
+    preview?.let { doc ->
+        val range = doc.entries.map { it.timestamp }.let { stamps ->
+            if (stamps.isEmpty()) tr("No entries") else listOf(
+                stamps.min(),
+                stamps.max()
+            ).joinToString(" – ") {
+                Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().toString()
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { if (!busy) preview = null },
+            title = { Text(tr("Replace current log?")) },
+            text = {
+                Column {
+                    Text(
+                        tr(
+                            "Medications: %d · Entries: %d",
+                            doc.medications.size,
+                            doc.entries.size
+                        )
+                    ); Text(range); Text(
+                    tr(
+                        "Observations: %d · Measurements: %d · Non-use records: %d",
+                        doc.observations.size,
+                        doc.measurements.size,
+                        doc.nonUse.size
+                    )
+                )
+                    Text(tr("This replaces the current log. A private pre-restore snapshot is kept on this device. Reminders stay off until you enable them."))
+                }
+            },
+            confirmButton = {
+                TextButton({
+                    vm.restore(doc) {
+                        preview = null; if (!restoreOnly) message =
+                        tr("Backup restored. Reminders are off.")
+                    }
+                }, enabled = !busy) { Text(tr("Replace log")) }
+            },
+            dismissButton = {
+                TextButton(
+                    { preview = null },
+                    enabled = !busy
+                ) { Text(tr("Cancel")) }
+            })
+    }
+    message?.let { text ->
+        AlertDialog(
+            onDismissRequest = { message = null },
+            text = { Text(text) },
+            confirmButton = { TextButton({ message = null }) { Text(tr("Close")) } })
+    }
 }
 
-@Composable private fun <T> kotlinx.coroutines.flow.MutableStateFlow<T>.collectAsStateMutable(): MutableState<T> {
-    val current=collectAsState()
-    return remember(this) { object : MutableState<T> {
-        override var value: T get()=current.value;set(value) { this@collectAsStateMutable.value=value }
-        override fun component1()=value
-        override fun component2(): (T)->Unit = { value=it }
-    } }
+@Composable
+private fun <T> kotlinx.coroutines.flow.MutableStateFlow<T>.collectAsStateMutable(): MutableState<T> {
+    val current = collectAsState()
+    return remember(this) {
+        object : MutableState<T> {
+            override var value: T
+                get() = current.value
+                set(value) {
+                    this@collectAsStateMutable.value = value
+                }
+
+            override fun component1() = value
+            override fun component2(): (T) -> Unit = { value = it }
+        }
+    }
 }

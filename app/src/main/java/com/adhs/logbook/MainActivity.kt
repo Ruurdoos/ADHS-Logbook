@@ -43,7 +43,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
@@ -557,15 +556,13 @@ fun LogbookApp(
                     )
                 }
 
-                tab == 1 -> Column {
-                    if (vm.enabled("weekly_enabled")) TextButton({ shouldPage = "weekly" }) {
-                        Text(
-                            tr("Weekly overview")
-                        )
-                    }
-                    TextButton({ shouldPage = "records" }) { Text(tr("Observations & non-use")) }
-                    Box(Modifier.weight(1f)) { HistoryScreen(state.entries) { editingEntry = it } }
-                }
+                tab == 1 -> HistoryScreen(
+                    entries = state.entries,
+                    onEdit = { editingEntry = it },
+                    onWeekly = if (vm.enabled("weekly_enabled")) {
+                        { shouldPage = "weekly" }
+                    } else null
+                )
 
                 tab == 2 -> ExportScreen(vm.document(), snackbar)
                 else -> SettingsScreen(
@@ -1496,7 +1493,7 @@ private fun EntryEditor(
         dismissButton = { TextButton({ delete = false }) { Text(tr("Keep entry")) } })
 }
 
-private fun pickDate(
+internal fun pickDate(
     context: Context,
     date: LocalDate,
     onPick: (LocalDate) -> Unit
@@ -1508,136 +1505,6 @@ private fun pickDate(
         date.monthValue - 1,
         date.dayOfMonth
     ).show()
-}
-
-@Composable
-private fun HistoryScreen(entries: List<DoseEntry>, onEdit: (Long) -> Unit) {
-    var filter by rememberSaveable { mutableStateOf<String?>(null) }
-    var query by rememberSaveable { mutableStateOf("") }
-    var medicationFilter by rememberSaveable { mutableStateOf<Long?>(null) }
-    var medicationMenu by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    val timeFormat = timeFormat(context)
-    val zone = ZoneId.systemDefault()
-    val grouped = entries.filter {
-        (filter == null || Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate()
-            .toString() == filter) && (medicationFilter == null || it.medicationId == medicationFilter) && (query.isBlank() || it.medicationName.contains(
-            query,
-            true
-        ) || it.notes.contains(query, true))
-    }
-        .groupBy { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() }
-    LazyColumn(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
-        contentPadding = PaddingValues(vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item { Title("History") }
-        item {
-            OutlinedTextField(
-                query,
-                { query = it },
-                Modifier.fillMaxWidth(),
-                label = { Text(tr("Search medications and notes")) })
-        }
-        item {
-            Box {
-                OutlinedButton({
-                    medicationMenu = true
-                }) {
-                    Text(
-                        entries.firstOrNull { it.medicationId == medicationFilter }?.medicationName
-                            ?: tr("All medications")
-                    )
-                }
-                DropdownMenu(medicationMenu, { medicationMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text(tr("All medications")) },
-                        onClick = { medicationFilter = null; medicationMenu = false })
-                    entries.distinctBy { it.medicationId }.forEach { e ->
-                        DropdownMenuItem(
-                            text = { Text(e.medicationName) },
-                            onClick = { medicationFilter = e.medicationId; medicationMenu = false })
-                    }
-                }
-            }
-        }
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton({
-                    pickDate(
-                        context,
-                        filter?.let(LocalDate::parse) ?: LocalDate.now()
-                    ) { filter = it.toString() }
-                }) {
-                    Icon(Icons.Outlined.CalendarToday, null); Spacer(Modifier.width(8.dp)); Text(
-                    filter ?: tr("Choose day")
-                )
-                }
-                if (filter != null) TextButton({ filter = null }) { Text(tr("Show all")) }
-            }
-        }
-        if (grouped.isEmpty()) item {
-            Text(
-                tr(if (filter == null) "No doses logged yet." else "No doses logged for this day."),
-                color = Muted,
-                modifier = Modifier.padding(vertical = 40.dp)
-            )
-        }
-        grouped.forEach { (date, dayEntries) ->
-            item(key = "day-$date") {
-                Text(
-                    when (date) {
-                        LocalDate.now() -> tr("Today"); LocalDate.now()
-                        .minusDays(1) -> tr("Yesterday"); else -> date.format(
-                        DateTimeFormatter.ofPattern(
-                            "d MMM yyyy"
-                        )
-                    )
-                    },
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 12.dp)
-                )
-            }
-            items(dayEntries, key = { it.id }) { entry ->
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { onEdit(entry.id) }
-                        .padding(vertical = 16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(
-                            Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(entry.medicationName)
-                            Note(
-                                "${doseText(entry.doseMg)} ${tr(entry.unit)} · ${
-                                    Instant.ofEpochMilli(
-                                        entry.timestamp
-                                    ).atZone(zone).format(timeFormat)
-                                }"
-                            )
-                        }
-                        entry.mood?.let {
-                            Text(
-                                moodFaces[it],
-                                fontSize = 22.sp,
-                                modifier = Modifier.semantics {
-                                    contentDescription = tr(moodLabels[it])
-                                })
-                        }
-                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = Muted)
-                    }
-                }
-                HorizontalDivider()
-            }
-        }
-        item { Note(tr("Times displayed in %s.", zone.id)) }
-    }
 }
 
 @Composable

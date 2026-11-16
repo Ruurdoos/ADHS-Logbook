@@ -383,6 +383,18 @@ object TextCatalog {
         "Mood recorded with doses" to "Stimmung bei der Einnahme",
         "Edit amount or time" to "Menge oder Zeitpunkt bearbeiten",
         "Record %s %s now" to "Jetzt %s %s erfassen",
+        "7 days" to "7 Tage",
+        "Month" to "Monat",
+        "Previous 7 days" to "Vorige 7 Tage",
+        "Next 7 days" to "Nächste 7 Tage",
+        "Previous month" to "Voriger Monat",
+        "Next month" to "Nächster Monat",
+        "Less" to "Weniger",
+        "More" to "Mehr",
+        "No doses" to "Keine Dosen",
+        "Doses: %d" to "Dosen: %d",
+        "Clear search" to "Suche löschen",
+        "No matching entries." to "Keine passenden Einträge.",
         "Today: %d records" to "Heute: %d Einträge",
         "Nothing recorded today" to "Heute noch nichts erfasst"
     )

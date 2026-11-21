@@ -46,15 +46,21 @@ Show Today, a date, a large “Estimated level” chart, “Last 24 hours”, an
 
 Combine contributions from logged doses of the same medication. When there are multiple medications, provide a compact medication selector and separate graph views. Do not add concentrations across different active ingredients. Relative chart values must not imply measured blood units, a therapeutic target, symptom control, or readiness to take another dose.
 
-The primary “Log dose” opens the prefilled entry form. A secondary “Log now · [usual dose] [unit]” action saves immediately and shows “Dose logged” with Undo. This resolves the brief's two entry paths: review/edit and immediate logging. Prevent repeated submission while a save is pending. Undo reverses only that specific entry.
+Intake is irregular, so Home has no scheduled slots. Order from top: medication chips (only with more than one active medication), one medication card, the estimate, “Recorded today”, and a single bottom “＋ Record” button.
 
-Empty state: “Your first dose starts the picture.” Action: “Log dose”. Never show fabricated patient history on a fresh installation.
+The medication card shows name, usual amount and last log. Its primary “✓ Taken · [usual dose] [unit]” saves immediately and shows “Dose logged · [dose]” with Change (opens the editor) and Undo. “Not taken” opens a non-use record for today so far. Prevent repeated submission while a save is pending. Undo reverses only that specific entry.
+
+“＋ Record” opens one sheet for everything else: Medication (different amount or time), “How am I doing?” with one chip per observation category, Not taken, and Measurement. Observations are always available; mood is recorded only as an observation.
+
+“Recorded today” lists doses, observations, measurements and non-use from today, newest first. Each row opens its editor. A link leads to all observations and non-use records.
+
+Empty state without medication: “Your log starts here.” with “Add medication”; “＋ Record” still offers observations and measurements. Never show fabricated patient history on a fresh installation.
 
 ### Log dose and edit entry
 
 Prefill the selected medication, configured dose, and the current local time. Time and date remain editable for retrospective entries. Capture the actual timestamp at save for the “Now” mode. Require a positive finite dose and a medication; show errors beside the relevant field. Do not silently clamp a dose or suggest a replacement dose.
 
-“How are you feeling? (optional)” starts collapsed. Expanded state has five labeled faces: Very low, Low, Okay, Good, Very good. Nothing is selected by default. Notes are optional. “Save dose” works without changing either optional field. Keep it above the keyboard and bottom safe area.
+New doses do not ask for mood; use a Mood observation instead. Older entries that already contain a dose mood still show it, collapsed, with five labeled faces so it can be changed or cleared. Notes are optional. “Save dose” works without changing either optional field. Keep it above the keyboard and bottom safe area.
 
 History opens the same form in edit mode, with “Save changes” and “Delete entry”. Confirm deletion with clear language or offer a reliable Undo. Medication edits in Settings must not rewrite old logged doses or names.
 

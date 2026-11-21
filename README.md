@@ -33,7 +33,7 @@ Run `test` with a specific simulator destination to execute native persistence/c
 
 - Four setup presets plus custom medications with name, formulation, optional strength, usual amount, and explicit `mg`, `ml`, or `unit`. No automatic dose conversion.
 - Immutable medication snapshots on entries; editing or archiving a medication preserves history. Android upgrades the existing SQLite database additively to schema 4. The new iOS host uses an atomically written private schema-1 document.
-- Last logged amount, date/time, and elapsed time above the estimate. Immediate logging, a prefilled editor, optional mood/notes, and Undo. Durable action identifiers prevent repeated external actions from creating duplicate doses.
+- Last logged amount, date/time, and elapsed time above the estimate. Home card with one-tap “Taken”, direct “Not taken”, Undo/Change, a “Recorded today” list, and one “＋ Record” sheet for other amounts/times, observations, non-use and measurements. Optional notes; mood is recorded as an observation (older dose moods stay editable). Durable action identifiers prevent repeated external actions from creating duplicate doses.
 - Editable history and local PDF/CSV export. PDF curves stay separate by medication identity and historical model; unsupported formulations remain logging-only.
 - Generic or explicitly medication-linked reminders with log-now, snooze, open, one optional follow-up, and a cutoff. Restoring a backup leaves reminders disabled until the user enables them.
 - Portable passphrase-encrypted backup, validated restore preview, atomic replacement, and a private pre-restore recovery copy. Both platforms read each other's backups.
@@ -41,7 +41,7 @@ Run `test` with a specific simulator destination to execute native persistence/c
 
 - Optional app lock using device authentication, background relocking, protected app-switcher previews, and lock-aware external actions. The lock setting remains on its original device and is not part of a portable backup.
 - Android Glance and iOS WidgetKit widgets. Settings selects one medication shared by all widget instances, with generic content by default. Non-private configurations can log after opening the app; stale configurations open review. Locking always hides widget details and requires authentication. Durable action IDs prevent duplicate delivery.
-- Independent, timestamped observations with explicit rated/none/unsure/recorded-time responses, optional dose links, sleep-night date, edits and deletion. An optional Home shortcut keeps the immediate dose path unchanged.
+- Independent, timestamped observations with explicit rated/none/unsure/recorded-time responses, optional dose links, sleep-night date, edits and deletion. Always reachable from the Home “＋ Record” sheet by category.
 - PDF summary with recorded counts, coverage, medication snapshot groups, appointment questions, note exclusion and chronological detail. CSV schema 2 distinguishes doses, observations and explicit non-use; see [report fields](docs/REPORT_FORMAT.md).
 - Optional supply ledgers with physical counts, restocks, explicit package-unit mapping or per-log consumption, edit/Undo reconciliation, and separate opt-in threshold/prescription notifications. Negative or incomplete estimates ask for a recount; they do not suggest doses.
 - Manual or timed reminder pause, plus separate explicit non-use records and periods. Missing records remain unknown. Pause cancels dose follow-ups; resumption schedules future occurrences. Restore keeps both dose and supply notifications disabled.

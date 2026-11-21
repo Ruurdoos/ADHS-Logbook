@@ -48,49 +48,139 @@ struct RootView: View {
     }
     @State private var restoring = false
     @State private var measurement: MeasurementValue?
-    func loggingActions(_ med: Med) -> some View {
-        VStack {
-            Button { linkedOccurrence = nil;entryEditor = newEntry(med) } label: {
-                Text(l("Log dose")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity).padding(.vertical,14)
-                    .overlay(Capsule().strokeBorder(Color.accentColor,lineWidth: 2)).contentShape(Capsule())
-            }.buttonStyle(.plain).foregroundStyle(Color.accentColor).font(.body.weight(.semibold))
+    @State private var nonUse: NonUseValue?
+    @State private var recording = false
+    @State private var pendingRecord: (() -> Void)?
+    var measurementsEnabled: Bool { store.state.document.preferences["measurements_enabled"] == "true" }
+    func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 16, content: content).frame(maxWidth: .infinity, alignment: .leading).padding()
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+    /// Not taken from Home covers today so far; a completed day can still be chosen in the form.
+    func notTakenToday(_ med: Med) -> NonUseValue {
+        let now = Date(), day = Calendar.current.startOfDay(for: now)
+        return NonUseValue(medicationId: med.id, start: millis(day), end: millis(now), createdAt: millis(), zoneId: TimeZone.current.identifier, offset: zoneOffset(day), kind: "period")
+    }
+    func medicationCard(_ med: Med) -> some View {
+        card {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(med.name).font(.title3.weight(.semibold))
+                Text(l("Usual amount: %s %s", number(med.usualDose), l(med.unit))).font(.footnote).foregroundStyle(.secondary)
+            }
+            TimelineView(.periodic(from: .now, by: 30)) { _ in
+                VStack(alignment: .leading, spacing: 4) {
+                    if let last = store.state.document.entries.first(where: { $0.medicationId == med.id }) {
+                        Text(l("Last logged")).font(.headline)
+                        Text("\(number(last.doseMg)) \(l(last.unit)) · ") + Text(date(last.timestamp), format: .dateTime.day().month().year().hour().minute())
+                        Text(date(last.timestamp), style: .relative).foregroundStyle(.secondary)
+                    }
+                    if !store.state.document.entries.contains(where: { $0.medicationId == med.id && Calendar.current.isDateInToday(date($0.timestamp)) }) { Text(l("No dose logged today.")).foregroundStyle(.secondary) }
+                }
+            }
             Button {
                 guard !store.busy else { return };store.attempt { try await store.quick(med) }
             } label: {
-                Text(l("Log now · %s %s", number(med.usualDose), l(med.unit))).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity)
+                Label(l("Taken · %s %s", number(med.usualDose), l(med.unit)), systemImage: "checkmark").fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity)
             }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).foregroundStyle(Color(.systemBackground)).controlSize(.large)
-            if let id = store.undoID {
-                Button(l("Dose logged")+" · "+l("Undo")) { store.attempt { try await store.delete(id) } }.frame(minHeight: 44)
-            }
-        }.frame(maxWidth: .infinity).padding().background(.regularMaterial)
-    }
-    @ViewBuilder var recordShortcut: some View {
-        let observations = store.state.document.preferences["observations_enabled"] == "true"
-        let measurements = store.state.document.preferences["measurements_enabled"] == "true"
-        if medication != nil {
-            if observations && measurements {
-                Menu {
-                    Button { observation = blankObservation() } label: { Label(l("Add observation"),systemImage: "square.and.pencil") }
-                    Button { measurement = blankMeasurement() } label: { Label(l("Add measurement"),systemImage: "waveform.path.ecg") }
-                } label: { Image(systemName: "plus.circle.fill").font(.title2) }.accessibilityLabel(l("Add observation or measurement"))
-            } else if observations {
-                Button { observation = blankObservation() } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(l("Add observation"))
-            } else if measurements {
-                Button { measurement = blankMeasurement() } label: { Image(systemName: "waveform.path.ecg") }.accessibilityLabel(l("Add measurement"))
-            }
+            Button { nonUse = notTakenToday(med) } label: { Text(l("Not taken")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity) }
+                .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.large)
         }
     }
-    var recordingActions: some View {
-        VStack {
-            if store.state.document.preferences["observations_enabled"] == "true" {
-                Button { observation = blankObservation() } label: { Text(l("Add observation")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground)).controlSize(.large)
-                Button(l("Add measurement")) { measurement = blankMeasurement() }.frame(minHeight: 44)
-            } else {
-                Button { measurement = blankMeasurement() } label: { Text(l("Add measurement")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground)).controlSize(.large)
+    @ViewBuilder var undoBanner: some View {
+        if let id = store.undoID, let entry = store.state.document.entries.first(where: { $0.id == id }) {
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout())
+            layout {
+                Text(l("Dose logged")+" · "+number(entry.doseMg)+" "+l(entry.unit)).frame(maxWidth: .infinity, alignment: .leading)
+                Button(l("Change")) { store.undoID = nil;linkedOccurrence = nil;entryEditor = entry }.frame(minHeight: 44)
+                Button(l("Undo")) { store.attempt { try await store.delete(id) } }.frame(minHeight: 44)
+            }.padding(.horizontal).padding(.vertical, 8).background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                .task(id: id) {
+                    guard !UIAccessibility.isVoiceOverRunning else { return }
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    if !Task.isCancelled && store.undoID == id { store.undoID = nil }
+                }
+        }
+    }
+    var recordButton: some View {
+        Button { recording = true } label: {
+            Text(l("＋ Record")).fixedSize(horizontal: false,vertical: true).frame(maxWidth: .infinity).padding(.vertical,14)
+                .overlay(Capsule().strokeBorder(Color.accentColor,lineWidth: 2)).contentShape(Capsule())
+        }.buttonStyle(.plain).foregroundStyle(Color.accentColor).font(.body.weight(.semibold))
+    }
+    struct TodayRow: Identifiable { let id: String;let time: Int64;let icon: String;let title: String;let open: () -> Void }
+    var todayRows: [TodayRow] {
+        let document = store.state.document
+        let from = millis(Calendar.current.startOfDay(for: Date())), until = millis(Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!)
+        var rows = document.entries.filter { $0.timestamp >= from && $0.timestamp < until }.map { entry in
+            TodayRow(id: "dose:\(entry.id)", time: entry.timestamp, icon: "pills", title: "\(entry.medicationName) · \(number(entry.doseMg)) \(l(entry.unit))") { linkedOccurrence = nil;entryEditor = entry }
+        }
+        rows += document.observations.filter { $0.timestamp >= from && $0.timestamp < until }.map { record in
+            let answer = record.response == "rated" && record.value != nil ? "\(record.value!) / 4" : l(responseName(record.response))
+            return TodayRow(id: "observation:"+record.id, time: record.timestamp, icon: "square.and.pencil", title: l(observationShortName(record.category))+" · "+answer) { observation = record }
+        }
+        rows += document.measurements.filter { $0.timestamp >= from && $0.timestamp < until }.map { record in
+            TodayRow(id: "measurement:"+record.id, time: record.timestamp, icon: "waveform.path.ecg", title: measurementText(record)) { measurement = record }
+        }
+        rows += document.nonUse.filter { $0.intersects(from, until) }.map { record in
+            TodayRow(id: "nonuse:"+record.id, time: record.start, icon: "minus.circle", title: l(nonUseName(record.recordKind))+(document.medications.first { $0.id == record.medicationId }.map { " · "+$0.name } ?? "")) { nonUse = record }
+        }
+        return rows.sorted { $0.time > $1.time }
+    }
+    var todaySection: some View {
+        let today = Calendar.current.startOfDay(for: Date())
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(l("Recorded today")).font(.headline)
+            let rows = todayRows
+            if rows.isEmpty { Text(l("Nothing recorded today")).foregroundStyle(.secondary) }
+            ForEach(rows) { row in
+                Button(action: row.open) {
+                    HStack(spacing: 16) {
+                        Image(systemName: row.icon).foregroundStyle(Color.accentColor).accessibilityHidden(true)
+                        VStack(alignment: .leading) {
+                            Text(row.title).foregroundStyle(.primary)
+                            Text(date(row.time), format: date(row.time) >= today ? .dateTime.hour().minute() : .dateTime.day().month().hour().minute()).font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
+                    }.padding(.horizontal).padding(.vertical, 10).frame(minHeight: 56).contentShape(Rectangle())
+                }.buttonStyle(.plain).background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
             }
-        }.frame(maxWidth: .infinity).padding().background(.regularMaterial)
+            NavigationLink(l("All observations & non-use")) { ObservationList() }.frame(minHeight: 44)
+        }
+    }
+    func recordOption(_ icon: String, _ title: String, _ subtitle: String, action: @escaping () -> Void) -> some View {
+        Button { pendingRecord = action;recording = false } label: {
+            HStack(spacing: 16) {
+                Image(systemName: icon).foregroundStyle(Color.accentColor).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) { Text(l(title)).font(.headline).foregroundStyle(.primary);Text(l(subtitle)).font(.footnote).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
+            }.padding().frame(minHeight: 64).contentShape(Rectangle())
+        }.buttonStyle(.plain).background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+    /// Single entry point for everything other than the usual dose taken now.
+    var recordSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let med = medication { recordOption("pills", "Medication", "Different amount or time") { linkedOccurrence = nil;entryEditor = newEntry(med) } }
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 16) {
+                            Image(systemName: "square.and.pencil").foregroundStyle(Color.accentColor).accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) { Text(l("How am I doing?")).font(.headline);Text(l("Choose what you noticed.")).font(.footnote).foregroundStyle(.secondary) }
+                        }
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: typeSize.isAccessibilitySize ? 240 : 110), spacing: 8)], alignment: .leading, spacing: 8) {
+                            ForEach(observationTypes, id: \.self) { category in
+                                Button { pendingRecord = { observation = blankObservation(category) };recording = false } label: { Text(l(observationShortName(category))).frame(maxWidth: .infinity, minHeight: 32) }
+                                    .buttonStyle(.bordered).buttonBorderShape(.capsule)
+                            }
+                        }
+                    }.padding().frame(maxWidth: .infinity, alignment: .leading).background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                    if let med = medication { recordOption("minus.circle", "Not taken", "A missed dose or a time without medication") { nonUse = notTakenToday(med) } }
+                    if medication == nil || measurementsEnabled { recordOption("waveform.path.ecg", "Measurement", "Blood pressure, pulse or weight") { measurement = blankMeasurement() } }
+                }.padding()
+            }.background(Color(.systemGroupedBackground))
+                .navigationTitle(l("What do you want to record?")).navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Close")) { recording = false } } }
+        }.presentationDetents([.medium, .large])
     }
     var body: some View {
         Group {
@@ -112,35 +202,35 @@ struct RootView: View {
                                 if let med = medication, let supply = store.state.document.supplies.first(where: { $0.medicationId == med.id }), let balance = try? store.state.document.balance(med.id), balance.inconsistent || balance.remaining <= supply.lowThreshold || (supply.prescriptionDate ?? Int64.max) <= millis() {
                                     NavigationLink(l("Estimated remaining: %s %s",number(balance.remaining),supply.unitLabel)) { SupplyForm(medId: med.id) }
                                 }
-                                if active.count > 1 { Picker(l("Medication"), selection: Binding(get: { medication?.id ?? 0 }, set: { selected = $0 })) { ForEach(active) { Text($0.name).tag($0.id) } }.pickerStyle(.menu) }
-                                if let med = medication {
-                                    if typeSize.isAccessibilitySize { loggingActions(med) }
-                                    TimelineView(.periodic(from: .now, by: 30)) { _ in
-                                        if let last = store.state.document.entries.first(where: { $0.medicationId == med.id }) {
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                Text(l("Last logged")).font(.headline)
-                                                Text("\(last.medicationName) · \(number(last.doseMg)) \(l(last.unit))")
-                                                Text(date(last.timestamp), format: .dateTime.day().month().year().hour().minute())
-                                                Text(date(last.timestamp), style: .relative).foregroundStyle(.secondary)
+                                if typeSize.isAccessibilitySize { undoBanner }
+                                if active.count > 1, let current = medication {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack {
+                                            ForEach(active) { med in
+                                                Button { selected = med.id } label: { Group { if med.id == current.id { Label(med.name, systemImage: "checkmark") } else { Text(med.name) } }.frame(minHeight: 32) }
+                                                    .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(med.id == current.id ? .accentColor : .secondary)
+                                                    .accessibilityAddTraits(med.id == current.id ? .isSelected : [])
                                             }
                                         }
-                                        if !store.state.document.entries.contains(where: { $0.medicationId == med.id && Calendar.current.isDateInToday(date($0.timestamp)) }) { Text(l("No dose logged today.")).foregroundStyle(.secondary) }
-                                        EstimateView(med: med, document: store.state.document, revision: store.revision)
-                                    }
+                                    }.accessibilityLabel(l("Medication"))
+                                }
+                                if let med = medication {
+                                    medicationCard(med)
+                                    EstimateView(med: med, document: store.state.document, revision: store.revision)
                                 } else {
-                                    if typeSize.isAccessibilitySize { recordingActions }
-                                    VStack(alignment: .leading, spacing: 12) {
+                                    card {
                                         Text(l("Your log starts here.")).font(.headline)
                                         Text(l("Record observations and measurements, with or without medication.")).font(.footnote)
                                         Button { medEditor = blankMedication() } label: { Text(l("Add medication")).frame(maxWidth: .infinity) }.buttonStyle(.bordered).controlSize(.large)
-                                    }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color(.secondarySystemGroupedBackground),in: RoundedRectangle(cornerRadius: 12))
+                                    }
                                 }
+                                todaySection
+                                if typeSize.isAccessibilitySize { recordButton }
                             }.padding(24)
                         }.navigationTitle(l("Today"))
-                            .toolbar { ToolbarItem(placement: .primaryAction) { recordShortcut } }
                             .safeAreaInset(edge: .bottom) {
                                 if !typeSize.isAccessibilitySize {
-                                    if let med = medication { loggingActions(med) } else { recordingActions }
+                                    VStack(spacing: 8) { undoBanner;recordButton }.frame(maxWidth: .infinity).padding().background(.regularMaterial)
                                 }
                             }
                     }.tabItem { Label(l("Home"), systemImage: "house") }.tag(0)
@@ -154,6 +244,8 @@ struct RootView: View {
         .sheet(isPresented: $restoring) { NavigationStack { BackupView().toolbar { ToolbarItem(placement: .cancellationAction) { Button(l("Close")) { restoring = false } } } } }
         .sheet(item: $measurement) { MeasurementForm(original: $0) }
         .sheet(item: $observation) { ObservationForm(value: $0) }
+        .sheet(item: $nonUse) { NonUseForm(value: $0) }
+        .sheet(isPresented: $recording, onDismiss: { pendingRecord?();pendingRecord = nil }) { recordSheet }
         .sheet(item: $medEditor) { MedicationForm(value: $0, onboarding: store.state.document.preferences["onboarded"] != "true") }
         .sheet(item: $entryEditor) { EntryForm(value: $0, occurrence: linkedOccurrence) }
         .alert(l("Something went wrong"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button(l("Close")) { store.error = nil } } message: { Text(store.error ?? "") }
@@ -290,8 +382,10 @@ struct EntryForm: View {
                 }
                 if value.id == 0 { Toggle(l("Taken now"), isOn: $useNow) }
                 if !useNow { DatePicker(l("Time"), selection: $time, in: ...Date()) }
-                DisclosureGroup(l("How are you feeling?"), isExpanded: $optional) {
-                    ForEach(0..<5, id: \.self) { i in Button { value.mood = value.mood == i ? nil : i } label: { HStack { Text(l(moods[i]));Spacer();if value.mood == i { Image(systemName: "checkmark") } } }.accessibilityAddTraits(value.mood == i ? .isSelected : []) }
+                if snapshot?.mood != nil {
+                    DisclosureGroup(l("How are you feeling?"), isExpanded: $optional) {
+                        ForEach(0..<5, id: \.self) { i in Button { value.mood = value.mood == i ? nil : i } label: { HStack { Text(l(moods[i]));Spacer();if value.mood == i { Image(systemName: "checkmark") } } }.accessibilityAddTraits(value.mood == i ? .isSelected : []) }
+                    }
                 }
                 TextField(l("Notes (optional)"), text: $value.notes, axis: .vertical).lineLimit(3...8)
                 if let error { Text(l(error)).foregroundStyle(.red).accessibilityAddTraits(.isStaticText) }

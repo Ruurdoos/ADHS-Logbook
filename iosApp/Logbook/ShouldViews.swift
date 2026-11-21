@@ -28,7 +28,7 @@ struct ObservationList: View {
             .sheet(item: $nonUse) { NonUseForm(value: $0) }
     }
 }
-func blankObservation() -> ObservationValue { ObservationValue(category: "focus",response: "",timestamp: millis(),createdAt: millis(),zoneId: TimeZone.current.identifier,offset: zoneOffset(Date())) }
+func blankObservation(_ category: String = "focus") -> ObservationValue { ObservationValue(category: category,response: "",timestamp: millis(),createdAt: millis(),zoneId: TimeZone.current.identifier,offset: zoneOffset(Date()),scaleVersion: category == "sleep" ? 2 : 1) }
 func blankNonUse() -> NonUseValue { let day = Calendar.current.startOfDay(for: Calendar.current.date(byAdding: .day,value: -1,to: Date())!);return NonUseValue(medicationId: 0,start: millis(day),end: millis(Calendar.current.date(byAdding: .day,value: 1,to: day)!),createdAt: millis(),zoneId: TimeZone.current.identifier,offset: zoneOffset(day),kind: "day") }
 private let dayFormatter: DateFormatter = { let f = DateFormatter();f.locale = Locale(identifier: "en_US_POSIX");f.dateFormat = "yyyy-MM-dd";return f }()
 struct ObservationForm: View {

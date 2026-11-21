@@ -10,6 +10,7 @@ func ratingDescription(_ category: String,_ version: Int) -> String {
 let observationTypes = ["focus","mood","appetite","sleep","symptom","benefit","fading"]
 let observationResponses = ["rated","none","unsure","recorded"]
 func categoryName(_ key: String) -> String { ["focus":"Focus / everyday functioning","mood":"Mood","appetite":"Appetite","sleep":"Sleep","symptom":"Symptom / suspected side effect","benefit":"User-noticed benefit","fading":"User-noticed fading"][key] ?? key }
+func observationShortName(_ key: String) -> String { ["focus":"Focus","mood":"Mood","appetite":"Appetite","sleep":"Sleep","symptom":"Symptom","benefit":"Noticed benefit","fading":"Noticed fading"][key] ?? key }
 func responseName(_ key: String) -> String { ["rated":"Rating","none":"None","unsure":"Unsure","recorded":"Recorded time"][key] ?? key }
 struct ObservationValue: Codable, Identifiable {
     var id = UUID().uuidString;var category: String;var response: String;var value: Int?

@@ -160,7 +160,6 @@ class LogbookViewModel(application: Application) : AndroidViewModel(application)
     fun deleteMeasurement(id: String, after: () -> Unit) =
         perform(after) { store.deleteMeasurement(id) }
 
-    fun observationsEnabled() = _state.value.preferences["observations_enabled"] == "true"
     fun document(): BackupDocument {
         val s = _state.value
         return BackupDocument(

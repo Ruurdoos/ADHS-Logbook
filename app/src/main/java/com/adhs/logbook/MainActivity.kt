@@ -10,18 +10,24 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import com.adhs.logbook.shared.observationShortName
+import com.adhs.logbook.shared.observationCategories
+import com.adhs.logbook.shared.nonUseName
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarVisuals
+import androidx.compose.material3.Snackbar
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -79,9 +85,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -118,7 +122,6 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -359,14 +362,15 @@ fun LogbookApp(
         }
     }
     LaunchedEffect(editingEntry) { if (editingEntry == null) pageState.removeState("dose-draft") }
-    fun saved(id: Long) {
+    fun saved(id: Long, detail: String? = null) {
         editingEntry = null
         occurrenceId = null
         scope.launch {
             if (snackbar.showSnackbar(
-                    tr("Dose logged"),
-                    tr("Undo"),
-                    duration = SnackbarDuration.Long
+                    DoseLoggedVisuals(
+                        listOfNotNull(tr("Dose logged"), detail).joinToString(" · "),
+                        id
+                    )
                 ) == SnackbarResult.ActionPerformed
             ) vm.delete(id)
         }
@@ -405,9 +409,25 @@ fun LogbookApp(
     Scaffold(
         containerColor = Paper,
         snackbarHost = {
-            if (editingEntry == null && editingMedication == null) SnackbarHost(
-                snackbar
-            )
+            if (editingEntry == null && editingMedication == null) SnackbarHost(snackbar) { data ->
+                val visuals = data.visuals
+                if (visuals is DoseLoggedVisuals) Snackbar(
+                    Modifier.padding(12.dp),
+                    actionOnNewLine = true,
+                    action = {
+                        Row {
+                            TextButton(
+                                { data.dismiss(); editingEntry = visuals.entryId },
+                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inversePrimary)
+                            ) { Text(tr("Change")) }
+                            TextButton(
+                                { data.performAction() },
+                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inversePrimary)
+                            ) { Text(tr("Undo")) }
+                        }
+                    }
+                ) { Text(visuals.message) } else Snackbar(data)
+            }
         },
         bottomBar = {
             if (state.loaded && state.onboarded && editingEntry == null && editingMedication == null && shouldPage == null) {
@@ -506,7 +526,7 @@ fun LogbookApp(
                         onBack = { leaveEditor { editingEntry = null; occurrenceId = null } },
                         onSave = { entry, actionId ->
                             vm.save(entry, actionId, occurrenceId) { id ->
-                                if (entry.id == 0L) saved(id) else {
+                                if (entry.id == 0L) saved(id, "${doseText(entry.doseMg)} ${tr(entry.unit)}") else {
                                     editingEntry =
                                         null; scope.launch { snackbar.showSnackbar(tr("Changes saved")) }
                                 }
@@ -541,18 +561,28 @@ fun LogbookApp(
                         state,
                         selected,
                         busy,
-                        { selectedMedication = it },
-                        { editingEntry = -1 },
-                        {
-                            selected?.let { vm.quick(it, ::saved) }
-                        },
-                        { editingMedication = -1 },
-                        onObservation = if (vm.observationsEnabled()) {
-                            { shouldPage = "observation:" }
-                        } else null,
-                        onMeasurement = { shouldPage = "measurement:" },
-                        onRecords = { shouldPage = "records" },
-                        measurementsEnabled = vm.enabled("measurements_enabled")
+                        HomeActions(
+                            selectMedication = { selectedMedication = it },
+                            taken = {
+                                selected?.let { med ->
+                                    vm.quick(med) { id ->
+                                        saved(id, "${doseText(med.usualDose)} ${tr(med.unit)}")
+                                    }
+                                }
+                            },
+                            notTaken = selected?.let { med -> { shouldPage = "nonuse-med:${med.id}" } },
+                            addMedication = { editingMedication = -1 },
+                            dose = selected?.let { { editingEntry = -1 } },
+                            observation = { category -> shouldPage = "observation:new:$category" },
+                            measurement = if (selected == null || vm.enabled("measurements_enabled")) {
+                                { shouldPage = "measurement:" }
+                            } else null,
+                            open = { target ->
+                                if (target.startsWith("dose:")) editingEntry = target.substringAfter(':').toLong()
+                                else shouldPage = target
+                            },
+                            allRecords = { shouldPage = "records" }
+                        )
                     )
                 }
 
@@ -842,19 +872,32 @@ private fun MedicationEditor(
     }
 }
 
+/** Snackbar shown after logging a dose, offering both "Change" and "Undo" for that entry. */
+internal class DoseLoggedVisuals(override val message: String, val entryId: Long) : SnackbarVisuals {
+    override val actionLabel: String get() = tr("Undo")
+    override val withDismissAction = false
+    override val duration = SnackbarDuration.Long
+}
+
+/** Destinations reachable from Home. Each record type has exactly one entry point. */
+internal class HomeActions(
+    val selectMedication: (Long) -> Unit,
+    val taken: () -> Unit,
+    val notTaken: (() -> Unit)?,
+    val addMedication: () -> Unit,
+    val dose: (() -> Unit)?,
+    val observation: ((String) -> Unit)?,
+    val measurement: (() -> Unit)?,
+    val open: (String) -> Unit,
+    val allRecords: () -> Unit
+)
+
 @Composable
 private fun HomeScreen(
     state: LogbookState,
     selected: Medication?,
     busy: Boolean,
-    onSelect: (Long) -> Unit,
-    onLog: () -> Unit,
-    onQuick: () -> Unit,
-    onAdd: () -> Unit,
-    onObservation: (() -> Unit)?,
-    onMeasurement: () -> Unit,
-    onRecords: () -> Unit,
-    measurementsEnabled: Boolean = false
+    actions: HomeActions
 ) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -870,193 +913,71 @@ private fun HomeScreen(
         homeLifecycle.addObserver(observer)
         onDispose { homeLifecycle.removeObserver(observer) }
     }
-    var menu by remember { mutableStateOf(false) }
     var modelInfo by remember { mutableStateOf(false) }
+    var recordSheet by rememberSaveable { mutableStateOf(false) }
     val zone = ZoneId.systemDefault()
     val relevant = state.entries.filter { it.medicationId == selected?.id }
-    val recordActions = if (selected == null) emptyList() else listOfNotNull(
-        onObservation?.let { RecordAction("Add observation", Icons.Outlined.EditNote, it) },
-        if (measurementsEnabled) RecordAction(
-            "Add measurement",
-            Icons.Outlined.MonitorHeart,
-            onMeasurement
-        ) else null,
-    )
-    var recordMenu by rememberSaveable { mutableStateOf(false) }
+    val canRecord = actions.dose != null || actions.observation != null || actions.notTaken != null || actions.measurement != null
     Column(
         Modifier
             .fillMaxSize()
             .padding(horizontal = 24.dp)
     ) {
-        Box(Modifier.weight(1f)) {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(top = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                Title("Today", Instant.ofEpochMilli(now).atZone(zone).format(dayFormat))
-                if (selected == null) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface,
-                        shape = MaterialTheme.shapes.large
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(top = 24.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Title("Today", Instant.ofEpochMilli(now).atZone(zone).format(dayFormat))
+            if (selected == null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = MaterialTheme.shapes.large
+                ) {
+                    Column(
+                        Modifier.padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Column(
-                            Modifier.padding(24.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text(tr("Your log starts here."), fontSize = 22.sp)
-                            Note("Record observations and measurements, with or without medication.")
-                            OutlinedButton(
-                                onAdd,
-                                Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 48.dp)
-                            ) { Text(tr("Add medication")) }
-                        }
-                    }
-                    RecordsCard(state, now, zone, onRecords)
-                } else {
-                    if (state.medications.count { it.active } > 1) Box {
+                        Text(tr("Your log starts here."), fontSize = 22.sp)
+                        Note("Record observations and measurements, with or without medication.")
                         OutlinedButton(
-                            { menu = true },
-                            Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                selected.name,
-                                Modifier.weight(1f)
-                            ); Icon(Icons.Outlined.ExpandMore, null)
-                        }
-                        DropdownMenu(menu, { menu = false }) {
-                            state.medications.filter { it.active }.forEach { med ->
-                                DropdownMenuItem(text = {
-                                    Text(
-                                        "${med.name} · ${doseText(med.usualDose)} ${
-                                            tr(
-                                                med.unit
-                                            )
-                                        }"
-                                    )
-                                }, onClick = { onSelect(med.id); menu = false })
-                            }
-                        }
+                            actions.addMedication,
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                        ) { Text(tr("Add medication")) }
                     }
-                    relevant.firstOrNull()?.let { last ->
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(tr("Last logged"), fontWeight = FontWeight.SemiBold)
-                            Text("${last.medicationName} · ${doseText(last.doseMg)} ${tr(last.unit)}")
-                            Note(
-                                Instant.ofEpochMilli(last.timestamp).atZone(zone)
-                                    .format(dateFormat) + " · " + Instant.ofEpochMilli(
-                                    last.timestamp
-                                ).atZone(zone).format(timeFormat(LocalContext.current))
-                            )
-                            val minutes = ((now - last.timestamp) / 60000).coerceAtLeast(0)
-                            Note(
-                                if (minutes == 0L) tr("Just now") else if (minutes < 60) tr(
-                                    "%d min ago",
-                                    minutes
-                                ) else tr("%d h %d min ago", minutes / 60, minutes % 60)
-                            )
-                        }
-                    }
-                    if (relevant.none {
-                            Instant.ofEpochMilli(it.timestamp).atZone(zone)
-                                .toLocalDate() == LocalDate.now()
-                        }) Note("No dose logged today.")
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface,
-                        shape = MaterialTheme.shapes.large
-                    ) {
-                        Column(
-                            Modifier.padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    tr("Estimated level"),
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 20.sp
-                                )
-                                Text(tr("24h"), color = Muted)
-                            }
-                            Note(selected.name)
-                            Surface(color = Pale, shape = MaterialTheme.shapes.extraLarge) {
-                                Text(
-                                    phaseText(
-                                        if (selected.modelId == null) EstimatePhase.UNAVAILABLE else Estimate.phase(
-                                            relevant,
-                                            selected.preset,
-                                            now
-                                        )
-                                    ),
-                                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    color = Sage,
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                            if (selected.modelId == null) {
-                                Text(
-                                    tr("Your doses are recorded. A short-term curve is not available for this medication."),
-                                    color = Muted
-                                )
-                            } else if (relevant.isEmpty()) {
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .height(160.dp),
-                                    contentAlignment = Alignment.Center
-                                ) { Text(tr("Log a dose to see your estimate."), color = Muted) }
-                            } else {
-                                LevelChart(relevant, selected.preset, now)
-                            }
-                            Note("Rough relative estimate, not a medical measurement. Do not use it to decide when to take a dose.")
-                            TextButton(
-                                { modelInfo = true },
-                                contentPadding = PaddingValues(0.dp)
-                            ) { Text(tr("About this estimate")) }
-                        }
-                    }
-                    RecordsCard(state, now, zone, onRecords)
-                    Spacer(Modifier.height(8.dp))
                 }
-                if (recordActions.isNotEmpty()) Spacer(Modifier.height(56.dp))
+            } else {
+                val active = state.medications.filter { it.active }
+                if (active.size > 1) Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    active.forEach { med ->
+                        FilterChip(
+                            med.id == selected.id,
+                            { actions.selectMedication(med.id) },
+                            label = { Text(med.name) },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        )
+                    }
+                }
+                MedicationCard(selected, relevant, now, zone, busy, actions)
+                EstimateCard(selected, relevant, now) { modelInfo = true }
             }
-            if (recordActions.isNotEmpty()) RecordFab(
-                recordActions,
-                recordMenu,
-                { recordMenu = it },
-                Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = 16.dp)
-            )
+            TodaySection(state, now, zone, actions)
         }
-        if (selected != null) {
-            Secondary("＋ Log dose", !busy, onLog)
+        if (canRecord) {
+            Secondary("＋ Record", !busy) { recordSheet = true }
             Spacer(Modifier.height(12.dp))
-            Primary(
-                tr("Log now · %s %s", doseText(selected.usualDose), tr(selected.unit)),
-                !busy,
-                onQuick
-            )
-            Spacer(Modifier.height(8.dp))
-        } else if (onObservation != null) {
-            Primary("Add observation", !busy, onObservation)
-            TextButton(
-                onMeasurement,
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp),
-                enabled = !busy
-            ) { Text(tr("Add measurement")) }
-        } else {
-            Primary("Add measurement", !busy, onMeasurement)
         }
     }
+    if (recordSheet) RecordSheet(actions) { recordSheet = false }
     if (modelInfo) AlertDialog(
         onDismissRequest = { modelInfo = false },
         confirmButton = { TextButton({ modelInfo = false }) { Text(tr("Got it")) } },
@@ -1073,117 +994,264 @@ private fun HomeScreen(
         })
 }
 
-/** Home entry point to observations, measurements and non-use records, with a short summary of today. */
+/** The selected medication with its one-tap "taken" action and the direct "not taken" route. */
 @Composable
-private fun RecordsCard(state: LogbookState, now: Long, zone: ZoneId, onOpen: () -> Unit) {
+private fun MedicationCard(
+    selected: Medication,
+    relevant: List<DoseEntry>,
+    now: Long,
+    zone: ZoneId,
+    busy: Boolean,
+    actions: HomeActions
+) {
+    val context = LocalContext.current
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large
+    ) {
+        Column(
+            Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(selected.name, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+                Note(tr("Usual amount: %s %s", doseText(selected.usualDose), tr(selected.unit)))
+            }
+            val last = relevant.firstOrNull()
+            if (last != null) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(tr("Last logged"), fontWeight = FontWeight.SemiBold)
+                val time = Instant.ofEpochMilli(last.timestamp).atZone(zone)
+                Text(
+                    "${doseText(last.doseMg)} ${tr(last.unit)} · " + time.format(dateFormat) + " · " +
+                            time.format(timeFormat(context))
+                )
+                val minutes = ((now - last.timestamp) / 60000).coerceAtLeast(0)
+                Note(
+                    if (minutes == 0L) tr("Just now") else if (minutes < 60) tr(
+                        "%d min ago",
+                        minutes
+                    ) else tr("%d h %d min ago", minutes / 60, minutes % 60)
+                )
+            }
+            if (relevant.none {
+                    Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() ==
+                            Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+                }) Note("No dose logged today.")
+            Button(
+                actions.taken,
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp),
+                enabled = !busy,
+                shape = MaterialTheme.shapes.large
+            ) {
+                Icon(Icons.Outlined.Check, null)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    tr("Taken · %s %s", doseText(selected.usualDose), tr(selected.unit)),
+                    fontSize = 16.sp,
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
+            }
+            actions.notTaken?.let { notTaken ->
+                OutlinedButton(
+                    notTaken,
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                    enabled = !busy,
+                    shape = MaterialTheme.shapes.large
+                ) { Text(tr("Not taken")) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EstimateCard(selected: Medication, relevant: List<DoseEntry>, now: Long, onInfo: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large
+    ) {
+        Column(
+            Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    tr("Estimated level"),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 20.sp
+                )
+                Text(tr("24h"), color = Muted)
+            }
+            Surface(color = Pale, shape = MaterialTheme.shapes.extraLarge) {
+                Text(
+                    phaseText(
+                        if (selected.modelId == null) EstimatePhase.UNAVAILABLE else Estimate.phase(
+                            relevant,
+                            selected.preset,
+                            now
+                        )
+                    ),
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    color = Sage,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+            if (selected.modelId == null) {
+                Text(
+                    tr("Your doses are recorded. A short-term curve is not available for this medication."),
+                    color = Muted
+                )
+            } else if (relevant.isEmpty()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    contentAlignment = Alignment.Center
+                ) { Text(tr("Log a dose to see your estimate."), color = Muted) }
+            } else {
+                LevelChart(relevant, selected.preset, now)
+            }
+            Note("Rough relative estimate, not a medical measurement. Do not use it to decide when to take a dose.")
+            TextButton(onInfo, contentPadding = PaddingValues(0.dp)) { Text(tr("About this estimate")) }
+        }
+    }
+}
+
+private class TodayItem(val time: Long, val target: String, val icon: ImageVector, val title: String)
+
+/** Chronological list of everything recorded today; each row opens its editor. */
+@Composable
+private fun TodaySection(state: LogbookState, now: Long, zone: ZoneId, actions: HomeActions) {
+    val context = LocalContext.current
     val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
     val from = today.atStartOfDay(zone).toInstant().toEpochMilli()
     val until = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-    val todayCount = state.observations.count { it.timestamp in from until until } +
-            state.measurements.count { it.timestamp in from until until } +
-            state.nonUse.count { it.intersects(from, until) }
+    val items = remember(state, from) {
+        (state.entries.filter { it.timestamp in from until until }.map {
+            TodayItem(it.timestamp, "dose:${it.id}", Icons.Outlined.Medication, "${it.medicationName} · ${doseText(it.doseMg)} ${tr(it.unit)}")
+        } + state.observations.filter { it.timestamp in from until until }.map {
+            val answer = if (it.response == "rated" && it.value != null) "${it.value} / 4" else tr(responseName(it.response))
+            TodayItem(it.timestamp, "observation:${it.id}", Icons.Outlined.EditNote, tr(observationShortName(it.category)) + " · " + answer)
+        } + state.measurements.filter { it.timestamp in from until until }.map {
+            TodayItem(it.timestamp, "measurement:${it.id}", Icons.Outlined.MonitorHeart, measurementText(it))
+        } + state.nonUse.filter { it.intersects(from, until) }.map {
+            TodayItem(it.start, "nonuse:${it.id}", Icons.Outlined.RemoveCircleOutline, tr(nonUseName(it.kind)) + (state.medications.find { m -> m.id == it.medicationId }?.let { m -> " · " + m.name } ?: ""))
+        }).sortedByDescending { it.time }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(tr("Recorded today"), fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        if (items.isEmpty()) Note("Nothing recorded today")
+        items.forEach { item ->
+            Surface(
+                onClick = { actions.open(item.target) },
+                color = MaterialTheme.colorScheme.surface,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    Modifier
+                        .heightIn(min = 56.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Icon(item.icon, null, tint = Sage)
+                    Column(Modifier.weight(1f)) {
+                        Text(item.title)
+                        Text(
+                            if (item.time >= from) Instant.ofEpochMilli(item.time).atZone(zone).format(timeFormat(context))
+                            else dateTimeText(item.time, context, zone),
+                            color = Muted,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = Muted)
+                }
+            }
+        }
+        TextButton(actions.allRecords, contentPadding = PaddingValues(0.dp)) {
+            Text(tr("All observations & non-use"))
+        }
+    }
+}
+
+/** Single entry point for everything other than the usual dose taken now. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun RecordSheet(actions: HomeActions, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Paper) {
+        Column(
+            Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(tr("What do you want to record?"), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            actions.dose?.let { dose ->
+                SheetOption(Icons.Outlined.Medication, "Medication", "Different amount or time") { onDismiss(); dose() }
+            }
+            actions.observation?.let { observe ->
+                Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.large) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Icon(Icons.Outlined.EditNote, null, tint = Sage)
+                            Column {
+                                Text(tr("How am I doing?"), fontWeight = FontWeight.SemiBold)
+                                Note("Choose what you noticed.")
+                            }
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            observationCategories.forEach { category ->
+                                AssistChip(
+                                    { onDismiss(); observe(category) },
+                                    label = { Text(tr(observationShortName(category))) },
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            actions.notTaken?.let { notTaken ->
+                SheetOption(Icons.Outlined.RemoveCircleOutline, "Not taken", "A missed dose or a time without medication") { onDismiss(); notTaken() }
+            }
+            actions.measurement?.let { measure ->
+                SheetOption(Icons.Outlined.MonitorHeart, "Measurement", "Blood pressure, pulse or weight") { onDismiss(); measure() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetOption(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Surface(
-        onClick = onOpen,
+        onClick = onClick,
         color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
-            Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            Modifier
+                .heightIn(min = 64.dp)
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Surface(color = Pale, shape = CircleShape, modifier = Modifier.size(44.dp)) {
-                Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.EditNote, null, tint = Sage) }
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(tr("Observations & non-use"), fontWeight = FontWeight.SemiBold)
-                Text(
-                    if (todayCount == 0) tr("Nothing recorded today") else tr("Today: %d records", todayCount),
-                    color = Muted,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+            Icon(icon, null, tint = Sage)
+            Column(Modifier.weight(1f)) {
+                Text(tr(title), fontWeight = FontWeight.SemiBold)
+                Note(subtitle)
             }
             Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = Muted)
-        }
-    }
-}
-
-internal class RecordAction(
-    val label: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-    val onClick: () -> Unit
-)
-
-/** Floating entry point for optional records: opens the single action directly, or a labelled menu when several are enabled. */
-@Composable
-internal fun BoxScope.RecordFab(
-    actions: List<RecordAction>,
-    expanded: Boolean,
-    onExpanded: (Boolean) -> Unit,
-    modifier: Modifier
-) {
-    val single = actions.singleOrNull()
-    if (single != null) {
-        FloatingActionButton(
-            single.onClick,
-            modifier,
-            containerColor = Pale,
-            contentColor = Sage
-        ) { Icon(single.icon, tr(single.label)) }
-        return
-    }
-    BackHandler(expanded) { onExpanded(false) }
-    AnimatedVisibility(expanded, Modifier.matchParentSize(), enter = fadeIn(), exit = fadeOut()) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Paper.copy(alpha = 0.85f))
-                .clickable(
-                    interactionSource = null,
-                    indication = null,
-                    onClickLabel = tr("Close")
-                ) { onExpanded(false) })
-    }
-    Column(
-        modifier,
-        horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        AnimatedVisibility(
-            expanded,
-            enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
-            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom)
-        ) {
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                actions.forEach { action ->
-                    ExtendedFloatingActionButton(
-                        { onExpanded(false); action.onClick() },
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = Sage
-                    ) {
-                        Icon(
-                            action.icon,
-                            null
-                        ); Spacer(Modifier.width(12.dp)); Text(tr(action.label))
-                    }
-                }
-            }
-        }
-        val rotation by animateFloatAsState(if (expanded) 45f else 0f, label = "record-fab")
-        FloatingActionButton(
-            { onExpanded(!expanded) },
-            containerColor = Pale,
-            contentColor = Sage
-        ) {
-            Icon(
-                Icons.Outlined.Add,
-                tr(if (expanded) "Close" else "Add observation or measurement"),
-                Modifier.rotate(rotation)
-            )
         }
     }
 }
@@ -1379,14 +1447,15 @@ private fun EntryEditor(
             { supplyUnits = it },
             label = { Text(tr("Stock units used (optional)")) },
             supportingText = { Text(tr("Only for supply tracking; separate from dose amount.")) })
-        HorizontalDivider()
-        TextButton({ expanded = !expanded }, Modifier.fillMaxWidth()) {
+        // Mood is recorded as an observation now; only legacy entries keep their dose mood editable.
+        if (entry?.mood != null) HorizontalDivider()
+        if (entry?.mood != null) TextButton({ expanded = !expanded }, Modifier.fillMaxWidth()) {
             Text(tr("How are you feeling?"), Modifier.weight(1f)); Text(
             tr("Optional"),
             fontSize = 12.sp
         ); Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null)
         }
-        if (expanded) {
+        if (expanded && entry?.mood != null) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 moodFaces.forEachIndexed { index, face ->
                     Surface(
@@ -1845,14 +1914,6 @@ private fun SettingsScreen(
         }
         item {
             SettingsSection(tr("Optional features")) {
-                SettingsSwitchRow(
-                    tr("Optional observations"),
-                    vm.observationsEnabled(),
-                    { vm.preference("observations_enabled", it.toString()) },
-                    icon = Icons.Outlined.EditNote,
-                    enabled = !busy
-                )
-                SettingsDivider()
                 SettingsSwitchRow(
                     tr("Measurements"),
                     vm.enabled("measurements_enabled"),

@@ -231,7 +231,8 @@ fun ShouldScreen(
                     state,
                     busy,
                     { vm.observation(it, close) },
-                    { vm.deleteObservation(it, close) })
+                    { vm.deleteObservation(it, close) },
+                    initialCategory = mode.substringAfter("observation:new:", "").takeIf { it in observationCategories })
             }
 
             mode.startsWith("nonuse-occ:") -> {
@@ -261,6 +262,15 @@ fun ShouldScreen(
                 } else Text(tr("Choose a medication."))
             }
 
+            mode.startsWith("nonuse-med:") -> NonUseEditor(
+                null,
+                state,
+                busy,
+                { vm.nonUse(it, close) },
+                { vm.deleteNonUse(it, close) },
+                initialMedication = mode.substringAfter(':').toLongOrNull()
+            )
+
             mode.startsWith("nonuse:") -> NonUseEditor(state.nonUse.find {
                 it.id == mode.substringAfter(
                     ':'
@@ -287,9 +297,10 @@ private fun ObservationEditor(
     state: LogbookState,
     busy: Boolean,
     save: (Observation) -> Unit,
-    delete: (String) -> Unit
+    delete: (String) -> Unit,
+    initialCategory: String? = null
 ) {
-    var category by rememberSaveable { mutableStateOf(original?.category ?: "focus") }
+    var category by rememberSaveable { mutableStateOf(original?.category ?: initialCategory ?: "focus") }
     var response by rememberSaveable { mutableStateOf(original?.response ?: "") }
     var rating by rememberSaveable { mutableIntStateOf(original?.value ?: -1) }
     var time by rememberSaveable {
@@ -409,17 +420,20 @@ private fun NonUseEditor(
     state: LogbookState,
     busy: Boolean,
     save: (NonUse) -> Unit,
-    delete: (String) -> Unit
+    delete: (String) -> Unit,
+    initialMedication: Long? = null
 ) {
-    var med by rememberSaveable { mutableStateOf(original?.medicationId?.toString() ?: "") }
+    var med by rememberSaveable { mutableStateOf((original?.medicationId ?: initialMedication)?.toString() ?: "") }
+    // From Home, "Not taken" usually means "so far today", which is recorded as a period ending now.
+    val fromHome = original == null && initialMedication != null
     var start by rememberSaveable {
         mutableLongStateOf(
-            original?.start ?: LocalDate.now().minusDays(1).atStartOfDay(ZoneId.systemDefault())
+            original?.start ?: LocalDate.now().minusDays(if (fromHome) 0 else 1).atStartOfDay(ZoneId.systemDefault())
                 .toInstant().toEpochMilli()
         )
     }
     var end by rememberSaveable { mutableLongStateOf(original?.end ?: System.currentTimeMillis()) }
-    var kind by rememberSaveable { mutableStateOf(original?.kind ?: "day") }
+    var kind by rememberSaveable { mutableStateOf(original?.kind ?: if (fromHome) "period" else "day") }
     var notes by rememberSaveable { mutableStateOf(original?.notes ?: "") }
     val id = rememberSaveable { original?.id ?: UUID.randomUUID().toString() }
     val zone = Instant.ofEpochMilli(start).atZone(ZoneId.systemDefault())

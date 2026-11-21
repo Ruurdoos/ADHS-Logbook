@@ -8,6 +8,11 @@ data class Observation(val id: String, val category: String, val response: Strin
     val scaleVersion: Int = 1, val sleepDate: String? = null, val doseId: Long? = null, val notes: String = "")
 val observationCategories = listOf("focus", "mood", "appetite", "sleep", "symptom", "benefit", "fading")
 val observationResponses = listOf("rated", "none", "unsure", "recorded")
+/** Compact category label for chips and lists; the editor keeps the full wording. */
+fun observationShortName(category: String) = when(category) {
+    "focus" -> "Focus"; "mood" -> "Mood"; "appetite" -> "Appetite"; "sleep" -> "Sleep"
+    "symptom" -> "Symptom"; "benefit" -> "Noticed benefit"; else -> "Noticed fading"
+}
 @Serializable
 data class NonUse(val id: String, val medicationId: Long, val start: Long, val end: Long,
     val createdAt: Long, val zoneId: String, val offset: String, val notes: String = "", val occurrenceId: String? = null, val kind: String = "legacy") {

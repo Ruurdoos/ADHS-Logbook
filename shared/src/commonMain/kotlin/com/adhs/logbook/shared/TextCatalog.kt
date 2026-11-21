@@ -396,6 +396,23 @@ object TextCatalog {
         "Clear search" to "Suche löschen",
         "No matching entries." to "Keine passenden Einträge.",
         "Today: %d records" to "Heute: %d Einträge",
-        "Nothing recorded today" to "Heute noch nichts erfasst"
+        "Nothing recorded today" to "Heute noch nichts erfasst",
+        "Taken · %s %s" to "Eingenommen · %s %s",
+        "Usual amount: %s %s" to "Übliche Menge: %s %s",
+        "＋ Record" to "＋ Erfassen",
+        "What do you want to record?" to "Was möchtest du erfassen?",
+        "Different amount or time" to "Andere Menge oder anderer Zeitpunkt",
+        "How am I doing?" to "Wie geht es mir?",
+        "Choose what you noticed." to "Wähle, was dir aufgefallen ist.",
+        "A missed dose or a time without medication" to "Vergessene Dosis oder Zeit ohne Medikament",
+        "Measurement" to "Messwert",
+        "Blood pressure, pulse or weight" to "Blutdruck, Puls oder Gewicht",
+        "Recorded today" to "Heute erfasst",
+        "All observations & non-use" to "Alle Beobachtungen und Nichteinnahmen",
+        "Change" to "Ändern",
+        "Focus" to "Fokus",
+        "Symptom" to "Symptom",
+        "Noticed benefit" to "Wirkung bemerkt",
+        "Noticed fading" to "Nachlassen bemerkt"
     )
 }
